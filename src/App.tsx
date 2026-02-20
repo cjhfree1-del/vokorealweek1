@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 type Anime = {
   id: number;
+  idMal?: number;
   title: {
     romaji?: string;
     english?: string;
@@ -58,6 +59,7 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
       sort: [POPULARITY_DESC, SCORE_DESC]
     ) {
       id
+      idMal
       title { romaji english native }
       description(asHtml: false)
       coverImage { medium large }
@@ -79,6 +81,7 @@ query ($id: Int) {
         rating
         mediaRecommendation {
           id
+          idMal
           title { romaji english native }
           description(asHtml: false)
           coverImage { medium large }
@@ -99,6 +102,7 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     media(type: ANIME, status_not_in: [NOT_YET_RELEASED], genre_in: $genreIn, sort: POPULARITY_DESC) {
       id
+      idMal
       title { romaji english native }
       description(asHtml: false)
       coverImage { medium large }
@@ -112,8 +116,67 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
 }
 `;
 
+const KOREAN_TITLE_BY_KEY: Record<string, string> = {
+  "attack on titan": "진격의 거인",
+  "shingeki no kyojin": "진격의 거인",
+  "demon slayer": "귀멸의 칼날",
+  "kimetsu no yaiba": "귀멸의 칼날",
+  "jujutsu kaisen": "주술회전",
+  "one piece": "원피스",
+  naruto: "나루토",
+  "naruto: shippuden": "나루토 질풍전",
+  "bleach": "블리치",
+  "spy x family": "스파이 패밀리",
+  "frieren: beyond journey's end": "장송의 프리렌",
+  "sousou no frieren": "장송의 프리렌",
+  "death note": "데스노트",
+  "steins;gate": "슈타인즈 게이트",
+  "fullmetal alchemist: brotherhood": "강철의 연금술사 브라더후드",
+  "my hero academia": "나의 히어로 아카데미아",
+  "bocchi the rock!": "봇치 더 록!",
+  "kaguya-sama: love is war": "카구야 님은 고백받고 싶어",
+  "re:zero -starting life in another world-": "리제로",
+  "re:zero kara hajimeru isekai seikatsu": "리제로",
+};
+
+const KOREAN_TITLE_BY_MAL_ID: Record<number, string> = {
+  16498: "진격의 거인",
+  5114: "강철의 연금술사 브라더후드",
+  30276: "원펀맨",
+  9253: "슈타인즈 게이트",
+  1535: "데스노트",
+  38000: "귀멸의 칼날",
+  40748: "주술회전",
+  21: "원피스",
+  11061: "헌터×헌터",
+  44511: "장송의 프리렌",
+};
+
+function normalizeTitle(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 function getTitle(anime: Anime): string {
-  return anime.title.english || anime.title.romaji || anime.title.native || `애니 #${anime.id}`;
+  if (anime.idMal && KOREAN_TITLE_BY_MAL_ID[anime.idMal]) {
+    return KOREAN_TITLE_BY_MAL_ID[anime.idMal];
+  }
+
+  const english = anime.title.english?.trim();
+  const romaji = anime.title.romaji?.trim();
+  const native = anime.title.native?.trim();
+
+  const candidates = [english, romaji, native].filter((v): v is string => !!v);
+  for (const raw of candidates) {
+    const key = normalizeTitle(raw);
+    if (KOREAN_TITLE_BY_KEY[key]) {
+      return KOREAN_TITLE_BY_KEY[key];
+    }
+  }
+
+  // Korean cache에 없으면 Japanese(native)는 사용하지 않음.
+  if (english) return english;
+  if (romaji) return romaji;
+  return `한글 제목 준비중 (#${anime.id})`;
 }
 
 function toKoreanGenre(genre: string): string {
