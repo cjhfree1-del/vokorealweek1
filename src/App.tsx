@@ -113,7 +113,7 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
 `;
 
 function getTitle(anime: Anime): string {
-  return anime.title.native || anime.title.romaji || anime.title.english || `Anime #${anime.id}`;
+  return anime.title.english || anime.title.romaji || anime.title.native || `애니 #${anime.id}`;
 }
 
 function toKoreanGenre(genre: string): string {
@@ -200,6 +200,7 @@ function scoreCandidate(candidate: Anime, seeds: Anime[]): number {
 
 export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
+  const [step2Tab, setStep2Tab] = useState(1);
 
   const [categoryAnimes, setCategoryAnimes] = useState<Anime[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(false);
@@ -227,7 +228,7 @@ export default function App() {
     return map;
   }, [categoryAnimes, similarAnimes]);
 
-  async function fetchCategoryAnimes() {
+  async function fetchCategoryAnimes(category: Category) {
     setCategoryLoading(true);
     setCategoryError("");
     setCategoryAnimes([]);
@@ -235,12 +236,14 @@ export default function App() {
     setSimilarAnimes([]);
     setPickedSimilarIds([]);
     setFinalRecs([]);
+    setFinalError("");
+    setStep2Tab(1);
 
     try {
       const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
-        genreIn: [selectedCategory.genre],
+        genreIn: [category.genre],
         page: 1,
-        perPage: 18,
+        perPage: 72,
       });
       setCategoryAnimes(data.Page.media ?? []);
     } catch (error) {
@@ -287,8 +290,9 @@ export default function App() {
         });
       }
 
+      const step2IdSet = new Set(categoryAnimes.map((anime) => anime.id));
       const unique = Array.from(new Map(all.map((a) => [a.id, a])).values()).filter(
-        (anime) => !pickedBaseIds.includes(anime.id),
+        (anime) => !pickedBaseIds.includes(anime.id) && !step2IdSet.has(anime.id),
       );
 
       setSimilarAnimes(unique.slice(0, 5));
@@ -343,8 +347,16 @@ export default function App() {
     }
   }
 
+  const visibleStep2Animes = useMemo(() => {
+    const size = 18;
+    const from = (step2Tab - 1) * size;
+    return categoryAnimes.slice(from, from + size);
+  }, [categoryAnimes, step2Tab]);
+
+  const step2TabCount = Math.max(1, Math.ceil(categoryAnimes.length / 18));
+
   return (
-    <div className="page">
+    <div className={`page ${!categoryAnimes.length && !similarAnimes.length && !finalRecs.length ? "landing" : ""}`}>
       <header className="hero">
         <p className="kicker">OTAKU MATCHMAKER</p>
         <h1>취향 고르면, 딱 맞는 다음 애니를 추천해줄게</h1>
@@ -357,32 +369,43 @@ export default function App() {
           {CATEGORIES.map((category) => (
             <button
               key={category.id}
-                className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
+              className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
               onClick={() => {
                 setSelectedCategoryId(category.id);
-                setCategoryAnimes([]);
                 setPickedBaseIds([]);
                 setSimilarAnimes([]);
                 setPickedSimilarIds([]);
                 setFinalRecs([]);
+                void fetchCategoryAnimes(category);
               }}
             >
               {category.label}
             </button>
           ))}
         </div>
-
-        <button className="primary-btn" onClick={() => void fetchCategoryAnimes()} disabled={categoryLoading}>
-          {categoryLoading ? "불러오는 중..." : "이 취향 애니 불러오기"}
-        </button>
+        {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
       </section>
 
       {!!categoryAnimes.length && (
         <section className="panel">
           <h2>STEP 2. 재밌게 본 애니 고르기 (최대 6개)</h2>
+          <div className="tab-row">
+            {Array.from({ length: step2TabCount }).map((_, idx) => {
+              const tab = idx + 1;
+              return (
+                <button
+                  key={tab}
+                  className={`tab-btn ${step2Tab === tab ? "active" : ""}`}
+                  onClick={() => setStep2Tab(tab)}
+                >
+                  {tab}
+                </button>
+              );
+            })}
+          </div>
           <div className="grid cards">
-            {categoryAnimes.map((anime) => (
+            {visibleStep2Animes.map((anime) => (
               <article
                 key={anime.id}
                 className={`anime-card ${pickedBaseIds.includes(anime.id) ? "selected" : ""}`}
