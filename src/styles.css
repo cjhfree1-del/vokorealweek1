@@ -1,0 +1,134 @@
+:root {
+  font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
+  color: #132021;
+  background: radial-gradient(circle at 15% 20%, #fff1c9 0%, #f2f7ef 45%, #d8f0ff 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.hero {
+  margin-bottom: 20px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 2px solid #132021;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 5px 5px 0 #132021;
+  padding: 18px;
+}
+
+.kicker {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: clamp(1.8rem, 3vw, 2.8rem);
+}
+
+h2 {
+  margin: 0 0 14px;
+  font-size: 1.3rem;
+}
+
+.muted {
+  color: #456062;
+}
+
+.label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.input {
+  border: 2px solid #132021;
+  border-radius: 12px;
+  padding: 10px;
+  font: inherit;
+}
+
+.checks {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.badge {
+  width: fit-content;
+  border: 2px solid #132021;
+  border-radius: 999px;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.badge-pass {
+  background: #b9ffd8;
+}
+
+.badge-caution {
+  background: #ffeaa5;
+}
+
+.badge-block {
+  background: #ffb8b8;
+}
+
+.score {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 4px 0;
+}
+
+.label-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.foot {
+  margin-top: 18px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}

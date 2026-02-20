@@ -18,6 +18,9 @@
 /.next/
 /out/
 
+# vite
+/dist/
+
 # production
 /build
 firebase-functions/lib
