@@ -7,8 +7,8 @@
 - `Next.js (App Router)`
 - `Firebase Auth / Firestore / Cloud Functions` 기본 연동 구조
 - `Firestore Rules` + `Indexes` 초안
-- `신원확인 API`, `게시글 API`, `신고 API` 기본 라우트
-- `관리자 콘솔 API + /admin 페이지`
+- Cloudflare Pages 정적 배포(`output: export`)
+- Firebase Functions 백엔드 분리 구조(`firebase-functions/`)
 - 신고 누적 5회 이상 게시글 `hidden` 처리 예시
 - Firestore 기반 서버측 Rate limit
 - 선택적 Firebase App Check 강제 검증
@@ -21,10 +21,10 @@
 npm install
 ```
 
-2. Functions 의존성 설치
+2. Firebase Functions 의존성 설치
 
 ```bash
-cd functions
+cd firebase-functions
 npm install
 cd ..
 ```
@@ -51,30 +51,23 @@ npm run dev
 
 브라우저: `http://localhost:3000`
 
-## API
+## 백엔드
 
-- `GET /api/posts`
-- `POST /api/posts`
-- `POST /api/reports`
-- `POST /api/verify-identity`
-- `GET /api/admin/reports?status=open`
-- `POST /api/admin/reports/:reportId/resolve`
-- `POST /api/admin/moderation-actions`
-
-신원확인 테스트:
-
-```bash
-curl -X POST http://localhost:3000/api/verify-identity \
-  -H "Content-Type: application/json" \
-  -d '{"uid":"demo","ci":"sample-ci","verification_token":"mock-success-token"}'
-```
+- Pages 프로젝트는 정적 프론트만 배포
+- 서버 API는 `firebase-functions/`를 별도 배포해 연결
 
 ## Firebase 파일
 
 - `firebase.json`
 - `firestore.rules`
 - `firestore.indexes.json`
-- `functions/src/index.ts`
+- `firebase-functions/src/index.ts`
+
+## Cloudflare Pages 설정
+
+- Build command: `npm run build`
+- Build output directory: `out`
+- Root directory: `/`
 
 ## 다음 권장 작업
 

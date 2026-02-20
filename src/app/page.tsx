@@ -1,7 +1,4 @@
 export default function Home() {
-  const verifyIdentityCurl =
-    "curl -X POST http://localhost:3000/api/verify-identity -H 'Content-Type: application/json' -d '{\"uid\":\"demo\",\"ci\":\"sample-ci\",\"verification_token\":\"mock-success-token\"}'";
-
   const collections = [
     "users",
     "boards",
@@ -11,11 +8,10 @@ export default function Home() {
     "moderation_actions",
   ];
 
-  const endpoints = [
-    "GET /api/posts",
-    "POST /api/posts",
-    "POST /api/reports",
-    "POST /api/verify-identity",
+  const deployNotes = [
+    "Cloudflare Pages Static Export",
+    "Build output: out/",
+    "API는 별도 Firebase Functions 백엔드에서 운영",
   ];
 
   return (
@@ -47,7 +43,7 @@ export default function Home() {
           <h3>현재 포함된 구현</h3>
           <p>신원확인, 게시글 생성, 신고 누적 숨김(5회), Firestore 인덱스/룰.</p>
           <div className="pill-row">
-            <span className="ticker">v0.1 ◉ API READY</span>
+            <span className="ticker">v0.1 ◉ STATIC READY</span>
           </div>
         </div>
       </section>
@@ -66,12 +62,12 @@ export default function Home() {
       </section>
 
       <section className="section">
-        <h2>API Endpoints</h2>
+        <h2>Deploy Notes</h2>
         <div className="grid-2">
-          {endpoints.map((endpoint) => (
-            <article className="post" key={endpoint}>
+          {deployNotes.map((note) => (
+            <article className="post" key={note}>
               <div className="card-header">
-                <span className="title">{endpoint}</span>
+                <span className="title">{note}</span>
               </div>
             </article>
           ))}
@@ -79,9 +75,12 @@ export default function Home() {
       </section>
 
       <section className="section">
-        <h2>테스트 예시</h2>
+        <h2>운영 메모</h2>
         <div className="card">
-          <p className="body"><code>{verifyIdentityCurl}</code></p>
+          <p className="body">
+            Cloudflare Pages는 정적 프론트만 배포합니다. 인증/신고/관리자 API는
+            `firebase-functions`를 별도 배포해 연결하세요.
+          </p>
         </div>
       </section>
 

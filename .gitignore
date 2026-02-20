@@ -20,7 +20,7 @@
 
 # production
 /build
-functions/lib
+firebase-functions/lib
 
 # misc
 .DS_Store

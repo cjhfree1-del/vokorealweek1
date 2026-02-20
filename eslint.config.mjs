@@ -12,8 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    "functions/lib/**",
-    "functions/node_modules/**",
+    ".vercel/**",
+    "firebase-functions/lib/**",
+    "firebase-functions/node_modules/**",
   ]),
 ]);
 
