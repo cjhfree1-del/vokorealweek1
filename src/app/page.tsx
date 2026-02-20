@@ -1,6 +1,23 @@
-import { channels, jobs, posts } from "@/lib/mock-data";
-
 export default function Home() {
+  const verifyIdentityCurl =
+    "curl -X POST http://localhost:3000/api/verify-identity -H 'Content-Type: application/json' -d '{\"uid\":\"demo\",\"ci\":\"sample-ci\",\"verification_token\":\"mock-success-token\"}'";
+
+  const collections = [
+    "users",
+    "boards",
+    "posts",
+    "comments",
+    "reports",
+    "moderation_actions",
+  ];
+
+  const endpoints = [
+    "GET /api/posts",
+    "POST /api/posts",
+    "POST /api/reports",
+    "POST /api/verify-identity",
+  ];
+
   return (
     <div className="page">
       <section className="hero">
@@ -8,82 +25,40 @@ export default function Home() {
           <div className="brand">
             <div className="logo">VOKO</div>
             <div>
-              <p className="meta">Korean Artist Community</p>
-              <h1>익명과 소셜이 공존하는 아티스트 베이스캠프.</h1>
+              <p className="meta">Firebase-first MVP</p>
+              <h1>한국 아티스트 익명 커뮤니티 초기 골격</h1>
             </div>
           </div>
           <p>
-            사운드, 비주얼, 퍼포먼스, 영상까지. 창작자들이 익명으로 고민을 나누고,
-            프로젝트를 연결하고, 채용 기회를 발견하는 레트로 감성 커뮤니티.
+            익명 노출과 신원확인을 분리한 구조를 기준으로, Firestore/Functions/Rules를
+            먼저 붙인 상태입니다. 플러그인을 바꿔도 Firebase를 중심으로 유지됩니다.
           </p>
           <div className="pill-row">
-            <span className="pill">익명 게시판</span>
-            <span className="pill">분야별 채널</span>
-            <span className="pill">구인구직</span>
-            <span className="pill">포트폴리오 링크</span>
-            <span className="pill">실시간 피드</span>
+            <span className="pill">Firebase Auth</span>
+            <span className="pill">Firestore Rules</span>
+            <span className="pill">Cloud Functions</span>
+            <span className="pill">Moderation Queue</span>
           </div>
           <div className="button-row">
-            <button className="button">익명으로 시작하기</button>
-            <button className="button secondary">소셜 로그인</button>
+            <a className="button" href="/admin">Admin Console 열기</a>
           </div>
         </div>
         <div className="hero-card">
-          <h3>오늘의 커뮤니티 펄스</h3>
-          <p>방금 올라온 익명 글 214개 • 프로젝트 매칭 18건</p>
+          <h3>현재 포함된 구현</h3>
+          <p>신원확인, 게시글 생성, 신고 누적 숨김(5회), Firestore 인덱스/룰.</p>
           <div className="pill-row">
-            <span className="ticker">LIVE ◉ CREW CALL</span>
-            <span className="ticker">NEW ◉ SHOWCASE</span>
+            <span className="ticker">v0.1 ◉ API READY</span>
           </div>
         </div>
       </section>
 
       <section className="section">
-        <h2>분야별 채널</h2>
-        <div className="grid-3">
-          {channels.map((channel) => (
-            <div className="card" key={channel.slug}>
-              <div className="card-header">
-                <strong>{channel.name}</strong>
-                <span className="meta">{channel.members} members</span>
-              </div>
-              <p>{channel.vibe}</p>
-              <div className="tag-row">
-                {channel.tags.map((tag) => (
-                  <span className="tag" key={tag}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="section">
-        <h2>익명 게시판</h2>
+        <h2>Firestore Collections</h2>
         <div className="grid-2">
-          {posts.map((post) => (
-            <article className="post" key={post.id}>
+          {collections.map((name) => (
+            <article className="post" key={name}>
               <div className="card-header">
-                <span className="title">{post.title}</span>
-                <span className="meta">{post.channel}</span>
-              </div>
-              <p className="body">{post.body}</p>
-              <div className="tag-row">
-                {post.tags.map((tag) => (
-                  <span className="tag" key={tag}>
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-              <div className="post-footer">
-                <span className="meta">
-                  {post.author} • {post.time}
-                </span>
-                <span>
-                  👍 {post.reactions} • 💬 {post.comments}
-                </span>
+                <span className="title">{name}</span>
               </div>
             </article>
           ))}
@@ -91,39 +66,31 @@ export default function Home() {
       </section>
 
       <section className="section">
-        <h2>구인구직 보드</h2>
-        <div className="grid-3">
-          {jobs.map((job) => (
-            <div className="job" key={job.id}>
+        <h2>API Endpoints</h2>
+        <div className="grid-2">
+          {endpoints.map((endpoint) => (
+            <article className="post" key={endpoint}>
               <div className="card-header">
-                <strong>{job.title}</strong>
-                <span className="badge">{job.type}</span>
+                <span className="title">{endpoint}</span>
               </div>
-              <p className="meta">
-                {job.studio} · {job.location}
-              </p>
-              <p>
-                <strong>{job.pay}</strong>
-              </p>
-              <div className="tag-row">
-                {job.tags.map((tag) => (
-                  <span className="tag" key={tag}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <span className="meta">{job.closing}</span>
-            </div>
+            </article>
           ))}
         </div>
       </section>
 
+      <section className="section">
+        <h2>테스트 예시</h2>
+        <div className="card">
+          <p className="body"><code>{verifyIdentityCurl}</code></p>
+        </div>
+      </section>
+
       <footer className="footer">
-        <span>VOKO SIGNAL 1998</span>
+        <span>VOKO MVP FIREBASE BASELINE</span>
         <div className="pill-row">
-          <span className="pill">커뮤니티 규칙</span>
-          <span className="pill">운영 정책</span>
-          <span className="pill">문의하기</span>
+          <span className="pill">identity_verified</span>
+          <span className="pill">hashed_ci</span>
+          <span className="pill">report_count threshold</span>
         </div>
       </footer>
     </div>

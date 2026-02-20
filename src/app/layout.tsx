@@ -14,9 +14,9 @@ const vt323 = VT323({
 });
 
 export const metadata: Metadata = {
-  title: "VOKO — Korean Artist Community",
+  title: "VOKO — Firebase-first Artist Community MVP",
   description:
-    "익명과 소셜이 공존하는 한국 아티스트 커뮤니티. 익명 게시판, 분야별 채널, 구인구직.",
+    "한국 아티스트 익명 커뮤니티 MVP. Firebase Auth, Firestore Rules, Cloud Functions 기반.",
 };
 
 export default function RootLayout({

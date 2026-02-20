@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).changedKeys()
+          .hasAny(['verification', 'status']);
+      allow delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.author_uid == request.auth.uid
+        && request.resource.data.status == "active";
+      allow update: if isSignedIn()
+        && resource.data.author_uid == request.auth.uid
+        && !request.resource.data.diff(resource.data).changedKeys()
+          .hasAny(['author_uid', 'report_count']);
+      allow delete: if false;
+    }
+
+    match /comments/{commentId} {
+      allow read: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.author_uid == request.auth.uid
+        && request.resource.data.status == "active";
+      allow update: if isSignedIn() && resource.data.author_uid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && request.resource.data.reporter_uid == request.auth.uid;
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.reporter_uid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /moderation_actions/{actionId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /rate_limits/{key} {
+      allow read, write: if false;
+    }
+  }
+}
