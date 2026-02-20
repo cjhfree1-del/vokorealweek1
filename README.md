@@ -1,78 +1,50 @@
-# VOKO Firebase MVP Baseline
+# VOKO Sample Risk Checker (Free Mode)
 
-한국 아티스트용 익명 커뮤니티를 위한 Firebase 중심 MVP 골격입니다.
+프로듀서/아티스트용 샘플 사전 점검 웹앱입니다.
+현재 버전은 **100% 무료 운영** 기준으로, 브라우저 내 신호 분석만 사용합니다.
 
-## 포함된 구성
+## 현재 아키텍처
 
-- `Next.js (App Router)`
-- `Firebase Auth / Firestore / Cloud Functions` 기본 연동 구조
-- `Firestore Rules` + `Indexes` 초안
-- Cloudflare Pages 정적 배포(`output: export`)
-- Firebase Functions 백엔드 분리 구조(`firebase-functions/`)
-- 신고 누적 5회 이상 게시글 `hidden` 처리 예시
-- Firestore 기반 서버측 Rate limit
-- 선택적 Firebase App Check 강제 검증
+- Frontend: `Vite + React`
+- Hosting: `Cloudflare Pages`
+- 분석 방식: 클라이언트(브라우저) 내 로컬 분석
+- 추적: Google Analytics + Microsoft Clarity
+- 광고: Google AdSense 스크립트(클라이언트 값 교체 필요)
 
-## 설치
+## 중요한 운영 원칙
 
-1. 루트 의존성 설치
-
-```bash
-npm install
-```
-
-2. Firebase Functions 의존성 설치
-
-```bash
-cd firebase-functions
-npm install
-cd ..
-```
-
-3. 환경변수 설정
-
-```bash
-cp .env.example .env.local
-```
-
-`FIREBASE_PRIVATE_KEY`는 줄바꿈을 `\n` 형태로 넣어주세요.
-
-추가 환경변수:
-- `IDENTITY_PROVIDER_MODE=mock|provider`
-- `IDENTITY_PROVIDER_VERIFY_URL` (실제 본인확인 연동 엔드포인트)
-- `IDENTITY_PROVIDER_API_KEY`, `IDENTITY_PROVIDER_API_SECRET`
-- `ENFORCE_APP_CHECK=true|false`
+- 이 서비스는 자동화된 **리스크 참고 도구**입니다.
+- Spotify/YouTube Music 등 플랫폼의 최종 판정을 보장하지 않습니다.
+- 상업 배포 전 라이선스/저작권 상태를 직접 확인해야 합니다.
 
 ## 실행
 
 ```bash
+npm install
 npm run dev
 ```
 
-브라우저: `http://localhost:3000`
+브라우저: `http://localhost:5173`
 
-## 백엔드
+## 배포 (Cloudflare Pages)
 
-- Pages 프로젝트는 정적 프론트만 배포
-- 서버 API는 `firebase-functions/`를 별도 배포해 연결
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name vokorealweek1
+```
 
-## Firebase 파일
+## 환경 변수 (선택)
 
-- `firebase.json`
-- `firestore.rules`
-- `firestore.indexes.json`
-- `firebase-functions/src/index.ts`
+- 기본 동작은 환경 변수 없이 동작합니다.
+- AdSense 실제 적용 시 `index.html`의 `ca-pub-XXXXXXXXXXXXXXXX`를 실제 pub ID로 교체하세요.
 
-## Cloudflare Pages 설정
+## 향후 무료 확장 옵션
 
-- Build command: `npm run build`
-- Build output directory: `out`
-- Root directory: `/`
+- Cloudflare Workers 무료 플랜으로 서버 분석 API 분리
+- AcoustID 무료 키 연동 (선택)
+- 내부 fingerprint 비교 DB 추가
 
-## 다음 권장 작업
+## 참고
 
-1. 실제 본인확인 공급자(KCB/KMC/NICE 등) 검증 로직 연결
-2. 관리자 콘솔(신고 처리/제재) UI 추가
-3. Rate limiting(Functions + App Check) 강화
-
-위 1~3은 현재 코드에 기본 구현되어 있으며, 실제 서비스에서는 각 공급자 계약정보/비밀키를 넣어 활성화하면 됩니다.
+`firebase-functions/` 폴더는 실험용 코드로 남아있으며,
+현재 배포/런타임 경로에는 포함되지 않습니다.

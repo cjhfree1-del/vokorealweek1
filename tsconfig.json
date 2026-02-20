@@ -20,7 +20,6 @@
   "include": ["src", "vite.config.ts"],
   "exclude": [
     "node_modules",
-    "firebase-functions",
-    "src/lib/server/security.ts"
+    "firebase-functions"
   ]
 }
