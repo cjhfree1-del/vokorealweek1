@@ -42,13 +42,13 @@ const CATEGORIES: Category[] = [
 ];
 
 const CATEGORY_ANIME_QUERY = `
-query ($genreIn: [String], $page: Int, $perPage: Int) {
+query ($genreIn: [String], $page: Int, $perPage: Int, $sort: [MediaSort]) {
   Page(page: $page, perPage: $perPage) {
     media(
       type: ANIME,
       status_not_in: [NOT_YET_RELEASED],
       genre_in: $genreIn,
-      sort: [POPULARITY_DESC, SCORE_DESC]
+      sort: $sort
     ) {
       id
       idMal
@@ -66,6 +66,13 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
   }
 }
 `;
+
+const CATEGORY_SORT_OPTIONS: string[][] = [
+  ["TRENDING_DESC", "POPULARITY_DESC"],
+  ["POPULARITY_DESC", "SCORE_DESC"],
+  ["FAVOURITES_DESC", "POPULARITY_DESC"],
+  ["SCORE_DESC", "POPULARITY_DESC"],
+];
 
 const FINAL_CANDIDATE_QUERY = `
 query ($genreIn: [String], $page: Int, $perPage: Int) {
@@ -278,6 +285,15 @@ function dedupeByFranchise(animes: Anime[]): Anime[] {
   return Array.from(map.values());
 }
 
+function shuffleArray<T>(items: T[]): T[] {
+  const cloned = [...items];
+  for (let i = cloned.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cloned[i], cloned[j]] = [cloned[j], cloned[i]];
+  }
+  return cloned;
+}
+
 function getTitle(anime: Anime, koTitleCache: Record<string, string>): string {
   const cached = koTitleCache[cacheKey(anime)];
   if (cached) return cached;
@@ -395,8 +411,10 @@ function buildReason(candidate: Anime, seeds: Anime[]): string {
 
 export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
+  const [hoveredCategoryId, setHoveredCategoryId] = useState<string | null>(null);
   const [categoryPage, setCategoryPage] = useState(0);
   const [seenCategoryIds, setSeenCategoryIds] = useState<number[]>([]);
+  const [categoryPreviewMap, setCategoryPreviewMap] = useState<Record<string, Anime | undefined>>({});
 
   const [categoryAnimes, setCategoryAnimes] = useState<Anime[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(false);
@@ -411,6 +429,7 @@ export default function App() {
   const [koTitleCache, setKoTitleCache] = useState<Record<string, string>>({});
   const lookupInFlight = useRef<Set<string>>(new Set());
   const lookupFailed = useRef<Set<string>>(new Set());
+  const previewInFlight = useRef<Set<string>>(new Set());
 
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
@@ -436,6 +455,32 @@ export default function App() {
     }
   }, [koTitleCache]);
 
+  async function ensureCategoryPreview(category: Category): Promise<void> {
+    if (categoryPreviewMap[category.id] || previewInFlight.current.has(category.id)) return;
+
+    previewInFlight.current.add(category.id);
+    try {
+      const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
+        genreIn: [category.genre],
+        page: Math.floor(Math.random() * 3) + 1,
+        perPage: 18,
+        sort: CATEGORY_SORT_OPTIONS[Math.floor(Math.random() * CATEGORY_SORT_OPTIONS.length)],
+      });
+
+      const candidates = dedupeByFranchise(
+        (data.Page.media ?? []).filter((anime) => !["SPECIAL", "MUSIC"].includes(anime.format ?? "")),
+      );
+      const picked = candidates[Math.floor(Math.random() * Math.max(candidates.length, 1))];
+      if (picked) {
+        setCategoryPreviewMap((prev) => (prev[category.id] ? prev : { ...prev, [category.id]: picked }));
+      }
+    } catch {
+      // ignore preview fetch failures
+    } finally {
+      previewInFlight.current.delete(category.id);
+    }
+  }
+
   async function fetchCategoryAnimes(category: Category, mode: "reset" | "refresh" = "reset") {
     setCategoryLoading(true);
     setCategoryError("");
@@ -450,7 +495,7 @@ export default function App() {
 
     const existingSeen = new Set(mode === "reset" ? [] : seenCategoryIds);
     const collectedMap = new Map<number, Anime>();
-    let pageCursor = mode === "reset" ? 1 : categoryPage + 1;
+    let pageCursor = mode === "reset" ? Math.floor(Math.random() * 10) + 1 : categoryPage + 1;
 
     try {
       for (let attempt = 0; attempt < 4 && collectedMap.size < 24; attempt++) {
@@ -458,6 +503,7 @@ export default function App() {
           genreIn: [category.genre],
           page: pageCursor,
           perPage: 50,
+          sort: CATEGORY_SORT_OPTIONS[(attempt + Math.floor(Math.random() * CATEGORY_SORT_OPTIONS.length)) % CATEGORY_SORT_OPTIONS.length],
         });
 
         const filtered = dedupeByFranchise(
@@ -473,12 +519,26 @@ export default function App() {
         pageCursor += 1;
       }
 
-      const nextList = Array.from(collectedMap.values()).slice(0, 24);
+      let nextList = shuffleArray(Array.from(collectedMap.values())).slice(0, 24);
       if (!nextList.length) {
-        setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
+        const fallback = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
+          genreIn: [category.genre],
+          page: 1,
+          perPage: 50,
+          sort: ["POPULARITY_DESC", "SCORE_DESC"],
+        });
+        nextList = shuffleArray(
+          dedupeByFranchise(
+            (fallback.Page.media ?? []).filter((anime) => !["MOVIE", "SPECIAL", "MUSIC"].includes(anime.format ?? "")),
+          ),
+        ).slice(0, 24);
       }
+      if (!nextList.length) setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
 
       setCategoryAnimes(nextList);
+      if (nextList[0]) {
+        setCategoryPreviewMap((prev) => (prev[category.id] ? prev : { ...prev, [category.id]: nextList[0] }));
+      }
       setSeenCategoryIds((prev) => {
         const base = mode === "reset" ? [] : prev;
         return Array.from(new Set([...base, ...nextList.map((a) => a.id)]));
@@ -538,6 +598,17 @@ export default function App() {
       setFinalLoading(false);
     }
   }
+
+  const previewCategoryId = hoveredCategoryId ?? selectedCategoryId;
+  const previewCategory = useMemo(
+    () => CATEGORIES.find((category) => category.id === previewCategoryId) ?? CATEGORIES[0],
+    [previewCategoryId],
+  );
+  const previewAnime = categoryPreviewMap[previewCategoryId];
+
+  useEffect(() => {
+    void ensureCategoryPreview(selectedCategory);
+  }, [selectedCategory]);
 
   const visibleAnimesForKoLookup = useMemo(
     () =>
@@ -614,13 +685,21 @@ export default function App() {
         <p>카테고리 선택 → 재밌게 본 애니 선택 → 최종 추천(4작품)</p>
       </header>
 
-      <section className="panel flow-panel">
+      <section className="flow-panel step1-panel">
         <h2>STEP 1. 카테고리 선택</h2>
-        <div className="chip-group">
+        <div className="chip-group" onMouseLeave={() => setHoveredCategoryId(null)}>
           {CATEGORIES.map((category) => (
             <button
               key={category.id}
               className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
+              onMouseEnter={() => {
+                setHoveredCategoryId(category.id);
+                void ensureCategoryPreview(category);
+              }}
+              onFocus={() => {
+                setHoveredCategoryId(category.id);
+                void ensureCategoryPreview(category);
+              }}
               onClick={() => {
                 setSelectedCategoryId(category.id);
                 void fetchCategoryAnimes(category, "reset");
@@ -629,6 +708,22 @@ export default function App() {
               {category.label}
             </button>
           ))}
+        </div>
+        <div className="category-preview">
+          {previewAnime ? (
+            <>
+              <img
+                src={previewAnime.coverImage?.large || previewAnime.coverImage?.medium || ""}
+                alt={`${previewCategory.label} 대표작`}
+              />
+              <div className="category-preview-meta">
+                <strong>{previewCategory.label} 대표작</strong>
+                <span>{getTitle(previewAnime, koTitleCache)}</span>
+              </div>
+            </>
+          ) : (
+            <p>{previewCategory.label} 카테고리에 마우스를 올리면 대표작 썸네일이 표시됩니다.</p>
+          )}
         </div>
         {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
