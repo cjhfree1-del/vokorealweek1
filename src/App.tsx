@@ -181,7 +181,7 @@ export default function App() {
             <div className="field-block">
               <label className="label">
                 <span className="label-head">타겟 플랫폼</span>
-                <select className="input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                <select className="input platform-select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
                   <option value="spotify">Spotify</option>
                   <option value="youtube-music">YouTube Music</option>
                   <option value="apple-music">Apple Music</option>

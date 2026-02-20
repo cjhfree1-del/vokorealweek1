@@ -86,6 +86,9 @@ h2 {
   background: #f4fbff;
   padding: 16px;
   box-shadow: 3px 3px 0 #2a4546;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .field-block:last-of-type {
@@ -97,6 +100,8 @@ h2 {
   gap: 8px;
   font-weight: 600;
   text-align: center;
+  justify-items: center;
+  width: 100%;
 }
 
 .label-head {
@@ -115,6 +120,16 @@ h2 {
   padding: 10px;
   font: inherit;
   background: #fff;
+}
+
+.platform-select {
+  width: min(520px, 100%);
+  text-align: center;
+  text-align-last: center;
+}
+
+.platform-select option {
+  text-align: center;
 }
 
 .dropzone {
