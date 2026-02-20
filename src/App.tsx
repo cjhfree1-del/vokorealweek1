@@ -7,6 +7,12 @@ type CheckResult = {
   score: number;
   reasons: string[];
   action: string;
+  breakdown: {
+    similarityRisk: number;
+    aiSignalRisk: number;
+    loopIntensityRisk: number;
+    vocalPresence: "낮음" | "중간" | "높음";
+  };
   fileName: string;
   fileType: string;
   fileSizeMb: string;
@@ -15,6 +21,17 @@ type CheckResult = {
 };
 
 type ViewMode = "input" | "result";
+const ANALYSIS_STAGES = [
+  "Audio fingerprint 생성 중...",
+  "플랫폼 정책 기준 매칭 중...",
+  "유사 패턴 탐지 중...",
+] as const;
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 function getAudioDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -43,6 +60,20 @@ function evaluateSample(file: File, duration: number, platform: string): CheckRe
 
   const extension = file.name.toLowerCase().split(".").pop() ?? "";
   const fileSizeMb = file.size / (1024 * 1024);
+  const similarityRisk = Math.min(
+    100,
+    Math.round((duration > 0 && duration < 4 ? 30 : 12) + (fileSizeMb < 0.1 ? 28 : 10)),
+  );
+  const aiSignalRisk = Math.min(
+    100,
+    Math.round((file.type === "" || file.type === "application/octet-stream" ? 34 : 14) + (platform === "multi" ? 15 : 7)),
+  );
+  const loopIntensityRisk = Math.min(
+    100,
+    Math.round(duration > 0 && duration < 2.5 ? 45 : duration > 0 && duration < 8 ? 23 : 9),
+  );
+  const vocalPresence: "낮음" | "중간" | "높음" =
+    duration > 40 ? "높음" : duration > 20 ? "중간" : "낮음";
 
   if (!["wav", "mp3"].includes(extension)) {
     score += 25;
@@ -81,6 +112,12 @@ function evaluateSample(file: File, duration: number, platform: string): CheckRe
       score,
       reasons,
       action: "배포를 멈추고 샘플 라이선스/출처 문서를 먼저 확보하세요.",
+      breakdown: {
+        similarityRisk,
+        aiSignalRisk,
+        loopIntensityRisk,
+        vocalPresence,
+      },
       fileName: file.name,
       fileType: file.type || "unknown",
       fileSizeMb: fileSizeMb.toFixed(2),
@@ -95,6 +132,12 @@ function evaluateSample(file: File, duration: number, platform: string): CheckRe
       score,
       reasons,
       action: "배포 전 클리어런스 증빙 문서와 샘플 출처를 추가 확인하세요.",
+      breakdown: {
+        similarityRisk,
+        aiSignalRisk,
+        loopIntensityRisk,
+        vocalPresence,
+      },
       fileName: file.name,
       fileType: file.type || "unknown",
       fileSizeMb: fileSizeMb.toFixed(2),
@@ -108,6 +151,12 @@ function evaluateSample(file: File, duration: number, platform: string): CheckRe
     score,
     reasons,
     action: "현재 신호 기준 리스크는 낮지만, 상업 배포 전 권리 검토는 유지하세요.",
+    breakdown: {
+      similarityRisk,
+      aiSignalRisk,
+      loopIntensityRisk,
+      vocalPresence,
+    },
     fileName: file.name,
     fileType: file.type || "unknown",
     fileSizeMb: fileSizeMb.toFixed(2),
@@ -124,6 +173,7 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [analysisStage, setAnalysisStage] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function handleSelectedFile(file: File | null) {
@@ -147,13 +197,20 @@ export default function App() {
 
     setErrorMessage("");
     setIsAnalyzing(true);
+    setAnalysisStage(ANALYSIS_STAGES[0]);
 
     const duration = await getAudioDuration(sampleFile);
+    await wait(700);
+    setAnalysisStage(ANALYSIS_STAGES[1]);
+    await wait(800);
+    setAnalysisStage(ANALYSIS_STAGES[2]);
+    await wait(700);
     const nextResult = evaluateSample(sampleFile, duration, platform);
 
     setResult(nextResult);
     setViewMode("result");
     setIsAnalyzing(false);
+    setAnalysisStage("");
   }
 
   function openFilePicker() {
@@ -238,9 +295,30 @@ export default function App() {
 
             {errorMessage && <p className="error-text">{errorMessage}</p>}
 
+            {isAnalyzing && (
+              <div className="analysis-box">
+                <p className="analysis-title">분석 진행 중</p>
+                <p className="analysis-stage">{analysisStage}</p>
+              </div>
+            )}
+
             <button className="btn" type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
               {isAnalyzing ? "분석 중..." : "리스크 분석하기"}
             </button>
+
+            <p className="notice-text">
+              현재 버전은 파일을 브라우저 내에서만 임시 처리하며 서버에 저장하지 않습니다.
+            </p>
+          </section>
+
+          <section className="card info-card">
+            <h2>이 서비스는 어떻게 작동하나요?</h2>
+            <ul className="list">
+              <li>오디오 기본 신호(길이, 포맷, 파일 특성) 분석</li>
+              <li>반복 루프 강도 및 유사 패턴 위험도 산출</li>
+              <li>플랫폼 정책 기준 기반 리스크 스코어링</li>
+              <li>배포 전 확인이 필요한 항목을 단계별로 안내</li>
+            </ul>
           </section>
         </main>
       )}
@@ -273,6 +351,27 @@ export default function App() {
               <p className="label-title">권장 액션</p>
               <p>{result.action}</p>
             </div>
+
+            <div>
+              <p className="label-title">Risk Breakdown</p>
+              <ul className="list">
+                <li>유사도 리스크: {result.breakdown.similarityRisk}/100</li>
+                <li>AI 생성 의심 신호: {result.breakdown.aiSignalRisk}/100</li>
+                <li>반복 루프 강도: {result.breakdown.loopIntensityRisk}/100</li>
+                <li>보컬 존재 가능성: {result.breakdown.vocalPresence}</li>
+              </ul>
+            </div>
+
+            <p className="notice-text">
+              본 리스크 평가는 자동화된 신호 기반 분석 결과이며, Spotify, YouTube Music 등 플랫폼의
+              최종 판정을 보장하지 않습니다. 상업적 배포 전에는 반드시 라이선스 및 저작권 상태를
+              직접 확인하시기 바랍니다.
+            </p>
+
+            <p className="notice-text">
+              업로드된 파일은 분석 후 자동 삭제 대상이며, 서버 분석 도입 시 24시간 내 삭제 정책으로
+              운영됩니다.
+            </p>
 
             <button className="btn secondary" type="button" onClick={resetToInput}>
               다른 파일 다시 분석

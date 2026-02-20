@@ -56,7 +56,10 @@ h2 {
   max-width: 860px;
   margin: 0 auto;
   display: flex;
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
+  gap: 14px;
 }
 
 .form-card,
@@ -72,6 +75,10 @@ h2 {
   padding: 28px;
   align-items: center;
   justify-content: center;
+}
+
+.result-card {
+  width: min(920px, 100%);
 }
 
 .form-card h2 {
@@ -156,6 +163,25 @@ h2 {
   font-weight: 700;
 }
 
+.analysis-box {
+  width: min(540px, 100%);
+  border: 2px solid #204b4d;
+  border-radius: 12px;
+  background: #e6f5ff;
+  padding: 12px;
+  text-align: center;
+}
+
+.analysis-title {
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+
+.analysis-stage {
+  margin: 0;
+  color: #214243;
+}
+
 .btn {
   border: 2px solid #132021;
   border-radius: 12px;
@@ -236,4 +262,15 @@ h2 {
   margin: 16px auto 0;
   text-align: center;
   font-size: 0.88rem;
+}
+
+.info-card {
+  width: min(920px, 100%);
+}
+
+.notice-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #375254;
+  line-height: 1.45;
 }
