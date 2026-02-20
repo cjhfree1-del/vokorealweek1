@@ -1,7 +1,5 @@
 import { useMemo, useState } from "react";
 
-type Preference = "love" | "neutral" | "dislike";
-
 type Anime = {
   id: number;
   title: {
@@ -15,38 +13,80 @@ type Anime = {
     medium?: string;
   };
   genres?: string[];
-  tags?: Array<{
-    name?: string;
-    rank?: number;
-  }>;
+  tags?: Array<{ name?: string; rank?: number }>;
   meanScore?: number;
   popularity?: number;
   seasonYear?: number;
 };
 
-type SeedItem = {
-  anime: Anime;
-  preference: Preference;
+type Category = {
+  id: string;
+  label: string;
+  genre: string;
+  subcategories: Array<{
+    id: string;
+    label: string;
+    tag?: string;
+  }>;
 };
 
-type RecommendationItem = {
-  anime: Anime;
-  score: number;
-  matchedGenres: string[];
-  matchedTags: string[];
-  why: string;
-};
+const CATEGORIES: Category[] = [
+  {
+    id: "lovecom",
+    label: "러브코미디",
+    genre: "Romance",
+    subcategories: [
+      { id: "school-love", label: "학원물", tag: "School" },
+      { id: "tsundere", label: "츤데레", tag: "Tsundere" },
+      { id: "harem", label: "하렘", tag: "Harem" },
+      { id: "wholesome", label: "달달함", tag: "Cute Girls Doing Cute Things" },
+    ],
+  },
+  {
+    id: "action",
+    label: "액션",
+    genre: "Action",
+    subcategories: [
+      { id: "battle", label: "배틀물", tag: "Shounen" },
+      { id: "superpower", label: "초능력", tag: "Super Power" },
+      { id: "military", label: "밀리터리", tag: "Military" },
+      { id: "samurai", label: "검/사무라이", tag: "Samurai" },
+    ],
+  },
+  {
+    id: "fantasy",
+    label: "판타지",
+    genre: "Fantasy",
+    subcategories: [
+      { id: "isekai", label: "이세계", tag: "Isekai" },
+      { id: "magic", label: "마법", tag: "Magic" },
+      { id: "adventure", label: "모험", tag: "Adventure" },
+      { id: "dark-fantasy", label: "다크판타지", tag: "Dark Fantasy" },
+    ],
+  },
+  {
+    id: "thriller",
+    label: "스릴러/미스터리",
+    genre: "Thriller",
+    subcategories: [
+      { id: "mystery", label: "미스터리", tag: "Detective" },
+      { id: "psychological", label: "심리전", tag: "Psychological" },
+      { id: "time-loop", label: "타임루프", tag: "Time Manipulation" },
+      { id: "survival", label: "생존", tag: "Survival" },
+    ],
+  },
+];
 
-type RecommendationRails = {
-  directHits: RecommendationItem[];
-  hiddenGems: RecommendationItem[];
-  freshPicks: RecommendationItem[];
-};
-
-const SEARCH_QUERY = `
-query ($search: String, $page: Int, $perPage: Int) {
+const CATEGORY_ANIME_QUERY = `
+query ($genreIn: [String], $tagIn: [String], $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(search: $search, type: ANIME, sort: POPULARITY_DESC) {
+    media(
+      type: ANIME,
+      status_not_in: [NOT_YET_RELEASED],
+      genre_in: $genreIn,
+      tag_in: $tagIn,
+      sort: [POPULARITY_DESC, SCORE_DESC]
+    ) {
       id
       title { romaji english native }
       description(asHtml: false)
@@ -61,7 +101,30 @@ query ($search: String, $page: Int, $perPage: Int) {
 }
 `;
 
-const CANDIDATE_QUERY = `
+const SIMILAR_QUERY = `
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    recommendations(sort: RATING_DESC, perPage: 12) {
+      nodes {
+        rating
+        mediaRecommendation {
+          id
+          title { romaji english native }
+          description(asHtml: false)
+          coverImage { medium large }
+          genres
+          tags { name rank }
+          meanScore
+          popularity
+          seasonYear
+        }
+      }
+    }
+  }
+}
+`;
+
+const FINAL_CANDIDATE_QUERY = `
 query ($genreIn: [String], $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     media(type: ANIME, status_not_in: [NOT_YET_RELEASED], genre_in: $genreIn, sort: POPULARITY_DESC) {
@@ -83,14 +146,14 @@ function getTitle(anime: Anime): string {
   return anime.title.english || anime.title.romaji || anime.title.native || `Anime #${anime.id}`;
 }
 
-function cleanDescription(input?: string): string {
-  if (!input) return "설명 정보가 없습니다.";
-  const stripped = input.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-  return stripped.length > 180 ? `${stripped.slice(0, 180)}...` : stripped;
+function trimDescription(description?: string): string {
+  if (!description) return "설명 정보가 없습니다.";
+  const cleaned = description.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.length > 120 ? `${cleaned.slice(0, 120)}...` : cleaned;
 }
 
-async function aniListFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const response = await fetch("https://graphql.anilist.co", {
+async function aniFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const res = await fetch("https://graphql.anilist.co", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -99,346 +162,342 @@ async function aniListFetch<T>(query: string, variables: Record<string, unknown>
     body: JSON.stringify({ query, variables }),
   });
 
-  if (!response.ok) {
-    throw new Error(`AniList request failed: ${response.status}`);
+  if (!res.ok) {
+    throw new Error(`AniList 요청 실패 (${res.status})`);
   }
 
-  const body = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
-  if (body.errors?.length) {
-    throw new Error(body.errors[0]?.message || "AniList GraphQL error");
+  const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
+  if (json.errors?.length) {
+    throw new Error(json.errors[0]?.message || "AniList GraphQL 오류");
   }
-  if (!body.data) {
-    throw new Error("AniList data is empty");
+  if (!json.data) {
+    throw new Error("AniList 응답 데이터 없음");
   }
-
-  return body.data;
+  return json.data;
 }
 
-function weightFromPreference(preference: Preference): number {
-  if (preference === "love") return 1.8;
-  if (preference === "neutral") return 1;
-  return -1.2;
-}
+function scoreCandidate(candidate: Anime, seeds: Anime[]): number {
+  const seedGenres = new Map<string, number>();
+  const seedTags = new Map<string, number>();
 
-function buildRecommendations(seedItems: SeedItem[], candidates: Anime[]): RecommendationRails {
-  const positiveSeeds = seedItems.filter((item) => item.preference !== "dislike");
-  const genreWeight = new Map<string, number>();
-  const tagWeight = new Map<string, number>();
-
-  seedItems.forEach((item) => {
-    const w = weightFromPreference(item.preference);
-    (item.anime.genres ?? []).forEach((genre) => {
-      genreWeight.set(genre, (genreWeight.get(genre) ?? 0) + w);
+  seeds.forEach((seed) => {
+    (seed.genres ?? []).forEach((genre) => {
+      seedGenres.set(genre, (seedGenres.get(genre) ?? 0) + 1);
     });
-
-    (item.anime.tags ?? []).forEach((tag) => {
+    (seed.tags ?? []).forEach((tag) => {
       if (!tag.name) return;
-      const rankWeight = (tag.rank ?? 50) / 100;
-      tagWeight.set(tag.name, (tagWeight.get(tag.name) ?? 0) + w * rankWeight);
+      const weight = ((tag.rank ?? 50) / 100) * 1.2;
+      seedTags.set(tag.name, (seedTags.get(tag.name) ?? 0) + weight);
     });
   });
 
-  const seedIds = new Set(seedItems.map((item) => item.anime.id));
-  const scored = candidates
-    .filter((anime) => !seedIds.has(anime.id))
-    .map((anime) => {
-      const genres = anime.genres ?? [];
-      const tags = (anime.tags ?? []).map((t) => t.name).filter((v): v is string => !!v);
+  let similarity = 0;
+  (candidate.genres ?? []).forEach((genre) => {
+    similarity += (seedGenres.get(genre) ?? 0) * 8;
+  });
 
-      let similarity = 0;
-      const matchedGenres = genres.filter((g) => (genreWeight.get(g) ?? 0) > 0);
-      matchedGenres.forEach((g) => {
-        similarity += (genreWeight.get(g) ?? 0) * 9;
-      });
+  (candidate.tags ?? []).forEach((tag) => {
+    if (!tag.name) return;
+    similarity += (seedTags.get(tag.name) ?? 0) * 5;
+  });
 
-      const matchedTags = tags.filter((t) => (tagWeight.get(t) ?? 0) > 0).slice(0, 6);
-      matchedTags.forEach((t) => {
-        similarity += (tagWeight.get(t) ?? 0) * 6;
-      });
-
-      const qualityBonus = ((anime.meanScore ?? 60) - 50) * 0.5;
-      const popularityBonus = Math.min(18, Math.log10((anime.popularity ?? 1) + 1) * 6);
-      const score = similarity + qualityBonus + popularityBonus;
-
-      const why =
-        matchedGenres.length || matchedTags.length
-          ? `${matchedGenres.slice(0, 2).join(", ")}${matchedTags[0] ? ` + ${matchedTags[0]}` : ""} 성향이 유사해서 추천`
-          : "시드와 완전 동일하진 않지만 점수/품질 기반으로 추천";
-
-      return {
-        anime,
-        score,
-        matchedGenres,
-        matchedTags,
-        why,
-      } satisfies RecommendationItem;
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const directHits = scored
-    .filter((item) => item.matchedGenres.length >= 2 || item.matchedTags.length >= 2)
-    .slice(0, 8);
-
-  const hiddenGems = scored
-    .filter((item) => (item.anime.popularity ?? 0) < 50000 && (item.anime.meanScore ?? 0) >= 75)
-    .slice(0, 8);
-
-  const seedGenres = new Set(positiveSeeds.flatMap((s) => s.anime.genres ?? []));
-  const freshPicks = scored
-    .filter((item) => (item.anime.genres ?? []).some((g) => !seedGenres.has(g)))
-    .slice(0, 8);
-
-  return {
-    directHits: directHits.length ? directHits : scored.slice(0, 8),
-    hiddenGems: hiddenGems.length ? hiddenGems : scored.slice(8, 16),
-    freshPicks: freshPicks.length ? freshPicks : scored.slice(16, 24),
-  };
+  const scoreBonus = ((candidate.meanScore ?? 65) - 60) * 0.5;
+  const popularityBonus = Math.min(15, Math.log10((candidate.popularity ?? 1) + 1) * 5);
+  return similarity + scoreBonus + popularityBonus;
 }
 
 export default function App() {
-  const [searchInput, setSearchInput] = useState("");
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState("");
-  const [searchResults, setSearchResults] = useState<Anime[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
+  const [selectedSubId, setSelectedSubId] = useState<string>(CATEGORIES[0].subcategories[0].id);
 
-  const [selectedSeeds, setSelectedSeeds] = useState<SeedItem[]>([]);
-  const [recommendLoading, setRecommendLoading] = useState(false);
-  const [recommendError, setRecommendError] = useState("");
-  const [rails, setRails] = useState<RecommendationRails | null>(null);
+  const [categoryAnimes, setCategoryAnimes] = useState<Anime[]>([]);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
 
-  const selectedSeedIds = useMemo(
-    () => new Set(selectedSeeds.map((item) => item.anime.id)),
-    [selectedSeeds],
+  const [pickedBaseIds, setPickedBaseIds] = useState<number[]>([]);
+
+  const [similarAnimes, setSimilarAnimes] = useState<Anime[]>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const [pickedSimilarIds, setPickedSimilarIds] = useState<number[]>([]);
+
+  const [finalRecs, setFinalRecs] = useState<Anime[]>([]);
+  const [finalLoading, setFinalLoading] = useState(false);
+  const [finalError, setFinalError] = useState("");
+
+  const selectedCategory = useMemo(
+    () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
+    [selectedCategoryId],
   );
 
-  async function runSearch() {
-    if (!searchInput.trim()) return;
-    setSearchLoading(true);
-    setSearchError("");
+  const selectedSub = useMemo(
+    () => selectedCategory.subcategories.find((s) => s.id === selectedSubId) ?? selectedCategory.subcategories[0],
+    [selectedCategory, selectedSubId],
+  );
+
+  const animeMap = useMemo(() => {
+    const map = new Map<number, Anime>();
+    categoryAnimes.forEach((a) => map.set(a.id, a));
+    similarAnimes.forEach((a) => map.set(a.id, a));
+    return map;
+  }, [categoryAnimes, similarAnimes]);
+
+  async function fetchCategoryAnimes() {
+    setCategoryLoading(true);
+    setCategoryError("");
+    setCategoryAnimes([]);
+    setPickedBaseIds([]);
+    setSimilarAnimes([]);
+    setPickedSimilarIds([]);
+    setFinalRecs([]);
 
     try {
-      const data = await aniListFetch<{ Page: { media: Anime[] } }>(SEARCH_QUERY, {
-        search: searchInput.trim(),
+      const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
+        genreIn: [selectedCategory.genre],
+        tagIn: selectedSub?.tag ? [selectedSub.tag] : undefined,
         page: 1,
-        perPage: 12,
+        perPage: 18,
       });
-      setSearchResults(data.Page.media ?? []);
+      setCategoryAnimes(data.Page.media ?? []);
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : "검색 중 오류가 발생했습니다.");
+      setCategoryError(error instanceof Error ? error.message : "카테고리 로딩 실패");
     } finally {
-      setSearchLoading(false);
+      setCategoryLoading(false);
     }
   }
 
-  function addSeed(anime: Anime) {
-    if (selectedSeedIds.has(anime.id)) return;
-    if (selectedSeeds.length >= 10) return;
-    setSelectedSeeds((prev) => [...prev, { anime, preference: "love" }]);
-    setRails(null);
-  }
-
-  function removeSeed(id: number) {
-    setSelectedSeeds((prev) => prev.filter((item) => item.anime.id !== id));
-    setRails(null);
-  }
-
-  function updatePreference(id: number, preference: Preference) {
-    setSelectedSeeds((prev) =>
-      prev.map((item) => (item.anime.id === id ? { ...item, preference } : item)),
+  function toggleBasePick(animeId: number) {
+    setPickedBaseIds((prev) =>
+      prev.includes(animeId) ? prev.filter((id) => id !== animeId) : [...prev, animeId].slice(0, 6),
     );
-    setRails(null);
+    setSimilarAnimes([]);
+    setPickedSimilarIds([]);
+    setFinalRecs([]);
   }
 
-  async function recommend() {
-    if (selectedSeeds.length < 3) {
-      setRecommendError("최소 3개 이상의 애니를 선택해 주세요.");
+  async function fetchSimilarFive() {
+    if (!pickedBaseIds.length) return;
+
+    setSimilarLoading(true);
+    setFinalRecs([]);
+
+    try {
+      const sourceIds = pickedBaseIds.slice(0, 3);
+      const all: Anime[] = [];
+
+      for (const id of sourceIds) {
+        const data = await aniFetch<{
+          Media: {
+            recommendations?: {
+              nodes?: Array<{
+                mediaRecommendation?: Anime;
+              }>;
+            };
+          };
+        }>(SIMILAR_QUERY, { id });
+
+        (data.Media.recommendations?.nodes ?? []).forEach((node) => {
+          if (node.mediaRecommendation) {
+            all.push(node.mediaRecommendation);
+          }
+        });
+      }
+
+      const unique = Array.from(new Map(all.map((a) => [a.id, a])).values()).filter(
+        (anime) => !pickedBaseIds.includes(anime.id),
+      );
+
+      setSimilarAnimes(unique.slice(0, 5));
+      setPickedSimilarIds([]);
+    } catch {
+      setSimilarAnimes([]);
+    } finally {
+      setSimilarLoading(false);
+    }
+  }
+
+  function toggleSimilarPick(animeId: number) {
+    setPickedSimilarIds((prev) =>
+      prev.includes(animeId) ? prev.filter((id) => id !== animeId) : [...prev, animeId].slice(0, 5),
+    );
+    setFinalRecs([]);
+  }
+
+  async function makeFinalRecommendations() {
+    const allSeedIds = [...pickedBaseIds, ...pickedSimilarIds];
+    if (allSeedIds.length < 3) {
+      setFinalError("최소 3개 이상 선택하면 추천 정확도가 올라갑니다.");
       return;
     }
 
-    setRecommendError("");
-    setRecommendLoading(true);
+    setFinalLoading(true);
+    setFinalError("");
 
     try {
-      const topGenres = Array.from(
-        new Set(selectedSeeds.flatMap((item) => item.anime.genres ?? [])),
-      ).slice(0, 5);
+      const seeds = allSeedIds.map((id) => animeMap.get(id)).filter((a): a is Anime => !!a);
+      const topGenres = Array.from(new Set(seeds.flatMap((s) => s.genres ?? []))).slice(0, 5);
 
-      const data = await aniListFetch<{ Page: { media: Anime[] } }>(CANDIDATE_QUERY, {
-        genreIn: topGenres.length ? topGenres : undefined,
+      const data = await aniFetch<{ Page: { media: Anime[] } }>(FINAL_CANDIDATE_QUERY, {
+        genreIn: topGenres.length ? topGenres : [selectedCategory.genre],
         page: 1,
-        perPage: 50,
+        perPage: 60,
       });
 
-      const nextRails = buildRecommendations(selectedSeeds, data.Page.media ?? []);
-      setRails(nextRails);
+      const seedSet = new Set(allSeedIds);
+      const ranked = (data.Page.media ?? [])
+        .filter((anime) => !seedSet.has(anime.id))
+        .map((anime) => ({ anime, score: scoreCandidate(anime, seeds) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12)
+        .map((item) => item.anime);
+
+      setFinalRecs(ranked);
     } catch (error) {
-      setRecommendError(error instanceof Error ? error.message : "추천 생성 중 오류가 발생했습니다.");
+      setFinalError(error instanceof Error ? error.message : "추천 생성 실패");
     } finally {
-      setRecommendLoading(false);
+      setFinalLoading(false);
     }
   }
 
   return (
     <div className="page">
       <header className="hero">
-        <p className="eyebrow">ANIMATCH LAB</p>
-        <h1>봤던 애니만 고르면, 취향 맞춤 추천을 뽑아드립니다</h1>
-        <p>
-          AniList 무료 데이터 기반으로 <strong>취향 직격</strong>, <strong>숨은 명작</strong>,
-          <strong> 새로움 추천</strong>을 동시에 제공합니다.
-        </p>
+        <p className="kicker">OTAKU MATCHMAKER</p>
+        <h1>취향 고르면, 딱 맞는 다음 애니를 추천해줄게</h1>
+        <p>카테고리 → 세부취향 → 재밌게 본 애니 선택 순서로 추천 정확도를 끌어올립니다.</p>
       </header>
 
-      <section className="panel search-panel">
-        <h2>1) 봤던 애니 검색</h2>
-        <div className="search-row">
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                void runSearch();
-              }
-            }}
-            placeholder="예: Attack on Titan, Steins;Gate"
-          />
-          <button onClick={() => void runSearch()} disabled={searchLoading}>
-            {searchLoading ? "검색 중..." : "검색"}
-          </button>
-        </div>
-
-        {searchError && <p className="error-text">{searchError}</p>}
-
-        <div className="grid cards">
-          {searchResults.map((anime) => (
-            <article className="anime-card" key={anime.id}>
-              <img
-                src={anime.coverImage?.medium || anime.coverImage?.large || ""}
-                alt={getTitle(anime)}
-              />
-              <div>
-                <h3>{getTitle(anime)}</h3>
-                <p>{cleanDescription(anime.description)}</p>
-                <div className="meta-row">
-                  <span>Score {anime.meanScore ?? "-"}</span>
-                  <span>{anime.seasonYear ?? "-"}</span>
-                </div>
-                <button
-                  className="add-btn"
-                  onClick={() => addSeed(anime)}
-                  disabled={selectedSeedIds.has(anime.id) || selectedSeeds.length >= 10}
-                >
-                  {selectedSeedIds.has(anime.id) ? "선택됨" : "시드에 추가"}
-                </button>
-              </div>
-            </article>
+      <section className="panel flow-panel">
+        <h2>STEP 1. 카테고리 선택</h2>
+        <div className="chip-group">
+          {CATEGORIES.map((category) => (
+            <button
+              key={category.id}
+              className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
+              onClick={() => {
+                setSelectedCategoryId(category.id);
+                setSelectedSubId(category.subcategories[0].id);
+                setCategoryAnimes([]);
+                setPickedBaseIds([]);
+                setSimilarAnimes([]);
+                setPickedSimilarIds([]);
+                setFinalRecs([]);
+              }}
+            >
+              {category.label}
+            </button>
           ))}
         </div>
-      </section>
 
-      <section className="panel seed-panel">
-        <h2>2) 선택한 시드 (3~10개)</h2>
-        <div className="seed-list">
-          {selectedSeeds.map((item) => (
-            <div className="seed-item" key={item.anime.id}>
-              <span>{getTitle(item.anime)}</span>
-              <div className="seed-actions">
-                <select
-                  value={item.preference}
-                  onChange={(e) => updatePreference(item.anime.id, e.target.value as Preference)}
-                >
-                  <option value="love">좋아함</option>
-                  <option value="neutral">보통</option>
-                  <option value="dislike">별로</option>
-                </select>
-                <button className="remove-btn" onClick={() => removeSeed(item.anime.id)}>
-                  제거
-                </button>
-              </div>
-            </div>
+        <h3>세부 카테고리</h3>
+        <div className="chip-group sub">
+          {selectedCategory.subcategories.map((sub) => (
+            <button
+              key={sub.id}
+              className={`chip-btn sub-chip ${selectedSubId === sub.id ? "active" : ""}`}
+              onClick={() => {
+                setSelectedSubId(sub.id);
+                setCategoryAnimes([]);
+                setPickedBaseIds([]);
+                setSimilarAnimes([]);
+                setPickedSimilarIds([]);
+                setFinalRecs([]);
+              }}
+            >
+              {sub.label}
+            </button>
           ))}
-          {!selectedSeeds.length && <p className="hint">먼저 검색에서 애니를 추가해 주세요.</p>}
         </div>
 
-        <button className="recommend-btn" onClick={() => void recommend()} disabled={recommendLoading}>
-          {recommendLoading ? "추천 생성 중..." : "3개 레일 추천 받기"}
+        <button className="primary-btn" onClick={() => void fetchCategoryAnimes()} disabled={categoryLoading}>
+          {categoryLoading ? "불러오는 중..." : "이 취향 애니 불러오기"}
         </button>
-        {recommendError && <p className="error-text">{recommendError}</p>}
+        {categoryError && <p className="error-text">{categoryError}</p>}
       </section>
 
-      {rails && (
+      {!!categoryAnimes.length && (
+        <section className="panel">
+          <h2>STEP 2. 재밌게 본 애니 고르기 (최대 6개)</h2>
+          <div className="grid cards">
+            {categoryAnimes.map((anime) => (
+              <article
+                key={anime.id}
+                className={`anime-card ${pickedBaseIds.includes(anime.id) ? "selected" : ""}`}
+                onClick={() => toggleBasePick(anime.id)}
+              >
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <div>
+                  <h4>{getTitle(anime)}</h4>
+                  <p>{trimDescription(anime.description)}</p>
+                  <div className="meta-row">
+                    <span>★ {anime.meanScore ?? "-"}</span>
+                    <span>{anime.seasonYear ?? "-"}</span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <button className="primary-btn" onClick={() => void fetchSimilarFive()} disabled={similarLoading || pickedBaseIds.length === 0}>
+            {similarLoading ? "비슷한 애니 분석 중..." : "비슷한 애니 5개 보기"}
+          </button>
+        </section>
+      )}
+
+      {!!similarAnimes.length && (
+        <section className="panel motion-in">
+          <h2>STEP 3. 비슷한 애니 중 추가로 재밌게 본 것 선택</h2>
+          <div className="grid cards five">
+            {similarAnimes.map((anime) => (
+              <article
+                key={anime.id}
+                className={`anime-card compact ${pickedSimilarIds.includes(anime.id) ? "selected" : ""}`}
+                onClick={() => toggleSimilarPick(anime.id)}
+              >
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <div>
+                  <h4>{getTitle(anime)}</h4>
+                  <p>{trimDescription(anime.description)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <button className="primary-btn strong" onClick={() => void makeFinalRecommendations()} disabled={finalLoading}>
+            {finalLoading ? "추천 생성 중..." : "최종 추천 받기"}
+          </button>
+          {finalError && <p className="error-text">{finalError}</p>}
+        </section>
+      )}
+
+      {!!finalRecs.length && (
         <section className="panel result-panel motion-in">
-          <h2>3) 추천 결과</h2>
-
-          <div className="rail">
-            <div className="rail-head">
-              <h3>취향 직격</h3>
-              <p>시드 태그/장르 유사도가 가장 높은 라인</p>
-            </div>
-            <div className="grid cards">
-              {rails.directHits.map((item) => (
-                <RecommendationCard key={item.anime.id} item={item} />
-              ))}
-            </div>
-          </div>
-
-          <div className="rail">
-            <div className="rail-head">
-              <h3>숨은 명작</h3>
-              <p>대중 노출은 낮지만 점수/완성도 신호가 높은 라인</p>
-            </div>
-            <div className="grid cards">
-              {rails.hiddenGems.map((item) => (
-                <RecommendationCard key={item.anime.id} item={item} />
-              ))}
-            </div>
-          </div>
-
-          <div className="rail">
-            <div className="rail-head">
-              <h3>새로움 추천</h3>
-              <p>취향은 맞지만 기존 시드와 다른 결을 섞은 라인</p>
-            </div>
-            <div className="grid cards">
-              {rails.freshPicks.map((item) => (
-                <RecommendationCard key={item.anime.id} item={item} />
-              ))}
-            </div>
+          <h2>추천 애니</h2>
+          <div className="grid cards">
+            {finalRecs.map((anime) => (
+              <article key={anime.id} className="anime-card result">
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <div>
+                  <h4>{getTitle(anime)}</h4>
+                  <p>{trimDescription(anime.description)}</p>
+                  <div className="meta-row">
+                    <span>평점 {anime.meanScore ?? "-"}</span>
+                    <span>인기 {anime.popularity ?? "-"}</span>
+                  </div>
+                  <div className="tag-row">
+                    {(anime.genres ?? []).slice(0, 3).map((g) => (
+                      <span key={g}>#{g}</span>
+                    ))}
+                  </div>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
       )}
 
       <footer className="footer-note">
-        <p>
-          데이터 출처: AniList GraphQL API (무료). 추천 결과는 참고용이며, 개인 취향에 따라 달라질 수
-          있습니다.
-        </p>
+        <p>Data by AniList API · 추천 결과는 취향 참고용입니다.</p>
       </footer>
     </div>
-  );
-}
-
-function RecommendationCard({ item }: { item: RecommendationItem }) {
-  return (
-    <article className="anime-card rec-card">
-      <img src={item.anime.coverImage?.medium || item.anime.coverImage?.large || ""} alt={getTitle(item.anime)} />
-      <div>
-        <h3>{getTitle(item.anime)}</h3>
-        <p>{cleanDescription(item.anime.description)}</p>
-        <div className="meta-row">
-          <span>추천점수 {Math.round(item.score)}</span>
-          <span>평점 {item.anime.meanScore ?? "-"}</span>
-        </div>
-        <p className="why">{item.why}</p>
-        <div className="chip-row">
-          {item.matchedGenres.slice(0, 2).map((genre) => (
-            <span key={genre} className="chip">#{genre}</span>
-          ))}
-          {item.matchedTags.slice(0, 2).map((tag) => (
-            <span key={tag} className="chip dim">#{tag}</span>
-          ))}
-        </div>
-      </div>
-    </article>
   );
 }
