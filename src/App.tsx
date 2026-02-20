@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 
 type CheckLevel = "PASS" | "CAUTION" | "BLOCK";
 
@@ -217,6 +217,26 @@ export default function App() {
     fileInputRef.current?.click();
   }
 
+  function handleUploadBlockDragOver(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleUploadBlockDragLeave(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleUploadBlockDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+    handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
+  }
+
+  function handleUploadBlockPaste(e: ClipboardEvent<HTMLDivElement>) {
+    handleSelectedFile(e.clipboardData.files?.[0] ?? null);
+  }
+
   function resetToInput() {
     setViewMode("input");
     setErrorMessage("");
@@ -247,7 +267,16 @@ export default function App() {
               </label>
             </div>
 
-            <div className="field-block">
+            <div
+              className={`field-block upload-block ${isDragging ? "dragging" : ""}`}
+              tabIndex={0}
+              role="button"
+              onClick={openFilePicker}
+              onDragOver={handleUploadBlockDragOver}
+              onDragLeave={handleUploadBlockDragLeave}
+              onDrop={handleUploadBlockDrop}
+              onPaste={handleUploadBlockPaste}
+            >
               <label className="label" htmlFor="sample-file-input">
                 <span className="label-head">샘플 파일 업로드</span>
                 <span className="label-sub">(drag & paste / wav, mp3)</span>
@@ -262,36 +291,31 @@ export default function App() {
                 />
               </label>
 
-              <div
-                className={`dropzone ${isDragging ? "dragging" : ""}`}
-                tabIndex={0}
-                role="button"
-                onClick={openFilePicker}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setIsDragging(true);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                  handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
-                }}
-                onPaste={(e) => {
-                  handleSelectedFile(e.clipboardData.files?.[0] ?? null);
-                }}
-              >
-                <p className="drop-title">파일을 여기로 드래그하거나 붙여넣기(Ctrl+V)</p>
-                <p className="muted">또는 클릭해서 파일 선택</p>
-              </div>
-            </div>
+              {!sampleFile && (
+                <div className="dropzone">
+                  <p className="drop-title">이 영역 아무 곳에나 파일을 드래그/붙여넣기</p>
+                  <p className="muted">또는 클릭해서 파일 선택</p>
+                </div>
+              )}
 
-            {sampleFile && (
-              <p className="muted">선택 파일: {sampleFile.name}</p>
-            )}
+              {sampleFile && (
+                <div className="file-tile">
+                  <div className="file-visual" aria-hidden>
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className="file-meta">
+                    <p className="file-name">{sampleFile.name}</p>
+                    <p className="file-detail">
+                      {(sampleFile.size / (1024 * 1024)).toFixed(2)} MB · {sampleFile.type || "audio"}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {errorMessage && <p className="error-text">{errorMessage}</p>}
 
@@ -325,12 +349,12 @@ export default function App() {
 
       {viewMode === "result" && result && (
         <main className="stack">
-          <section className="card result-card">
+          <section className="card result-card motion-in">
             <h2>리스크 결과</h2>
             <p className={`badge badge-${result.level.toLowerCase()}`}>{result.level}</p>
             <p className="score">Risk Score: {result.score}/100</p>
 
-            <div className="meta-grid">
+            <div className="meta-grid result-section rs1">
               <p><strong>파일:</strong> {result.fileName}</p>
               <p><strong>형식:</strong> {result.fileType}</p>
               <p><strong>용량:</strong> {result.fileSizeMb} MB</p>
@@ -338,7 +362,7 @@ export default function App() {
               <p><strong>플랫폼:</strong> {result.platform}</p>
             </div>
 
-            <div>
+            <div className="result-section rs2">
               <p className="label-title">판정 근거</p>
               <ul className="list">
                 {result.reasons.map((reason) => (
@@ -347,12 +371,12 @@ export default function App() {
               </ul>
             </div>
 
-            <div>
+            <div className="result-section rs3">
               <p className="label-title">권장 액션</p>
               <p>{result.action}</p>
             </div>
 
-            <div>
+            <div className="result-section rs4">
               <p className="label-title">Risk Breakdown</p>
               <ul className="list">
                 <li>유사도 리스크: {result.breakdown.similarityRisk}/100</li>
