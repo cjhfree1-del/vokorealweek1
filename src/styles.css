@@ -55,6 +55,8 @@ h2 {
 .stack {
   max-width: 860px;
   margin: 0 auto;
+  display: flex;
+  justify-content: center;
 }
 
 .form-card,
@@ -65,14 +67,46 @@ h2 {
 }
 
 .form-card {
-  min-height: 460px;
-  padding: 24px;
+  width: min(920px, 100%);
+  min-height: 520px;
+  padding: 28px;
+  align-items: center;
+  justify-content: center;
+}
+
+.form-card h2 {
+  width: 100%;
+  text-align: center;
+}
+
+.field-block {
+  width: min(720px, 100%);
+  border: 2px solid #2a4546;
+  border-radius: 14px;
+  background: #f4fbff;
+  padding: 16px;
+  box-shadow: 3px 3px 0 #2a4546;
+}
+
+.field-block:last-of-type {
+  background: #eefdf7;
 }
 
 .label {
   display: grid;
   gap: 8px;
   font-weight: 600;
+  text-align: center;
+}
+
+.label-head {
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.label-sub {
+  font-size: 0.86rem;
+  color: #3a5658;
 }
 
 .input {
@@ -87,7 +121,7 @@ h2 {
   min-height: 220px;
   border: 2px dashed #132021;
   border-radius: 14px;
-  background: #eefdf7;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,6 +149,7 @@ h2 {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  width: min(340px, 100%);
 }
 
 .btn.secondary {

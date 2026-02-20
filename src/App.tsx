@@ -178,53 +178,58 @@ export default function App() {
           <section className="card form-card">
             <h2>샘플 정보 입력</h2>
 
-            <label className="label">
-              타겟 플랫폼
-              <select className="input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-                <option value="spotify">Spotify</option>
-                <option value="youtube-music">YouTube Music</option>
-                <option value="apple-music">Apple Music</option>
-                <option value="multi">멀티 배포</option>
-              </select>
-            </label>
+            <div className="field-block">
+              <label className="label">
+                <span className="label-head">타겟 플랫폼</span>
+                <select className="input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                  <option value="spotify">Spotify</option>
+                  <option value="youtube-music">YouTube Music</option>
+                  <option value="apple-music">Apple Music</option>
+                  <option value="multi">멀티 배포</option>
+                </select>
+              </label>
+            </div>
 
-            <label className="label" htmlFor="sample-file-input">
-              샘플 파일 업로드 (drag & paste / wav, mp3)
-              <input
-                ref={fileInputRef}
-                id="sample-file-input"
-                className="input"
-                type="file"
-                accept=".wav,.mp3,audio/wav,audio/mpeg"
-                onChange={(e) => handleSelectedFile(e.target.files?.[0] ?? null)}
-                hidden
-              />
-            </label>
+            <div className="field-block">
+              <label className="label" htmlFor="sample-file-input">
+                <span className="label-head">샘플 파일 업로드</span>
+                <span className="label-sub">(drag & paste / wav, mp3)</span>
+                <input
+                  ref={fileInputRef}
+                  id="sample-file-input"
+                  className="input"
+                  type="file"
+                  accept=".wav,.mp3,audio/wav,audio/mpeg"
+                  onChange={(e) => handleSelectedFile(e.target.files?.[0] ?? null)}
+                  hidden
+                />
+              </label>
 
-            <div
-              className={`dropzone ${isDragging ? "dragging" : ""}`}
-              tabIndex={0}
-              role="button"
-              onClick={openFilePicker}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
-              }}
-              onPaste={(e) => {
-                handleSelectedFile(e.clipboardData.files?.[0] ?? null);
-              }}
-            >
-              <p className="drop-title">파일을 여기로 드래그하거나 붙여넣기(Ctrl+V)</p>
-              <p className="muted">또는 클릭해서 파일 선택</p>
+              <div
+                className={`dropzone ${isDragging ? "dragging" : ""}`}
+                tabIndex={0}
+                role="button"
+                onClick={openFilePicker}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
+                }}
+                onPaste={(e) => {
+                  handleSelectedFile(e.clipboardData.files?.[0] ?? null);
+                }}
+              >
+                <p className="drop-title">파일을 여기로 드래그하거나 붙여넣기(Ctrl+V)</p>
+                <p className="muted">또는 클릭해서 파일 선택</p>
+              </div>
             </div>
 
             {sampleFile && (
