@@ -170,6 +170,7 @@ const KOREAN_TITLE_BY_MAL_ID: Record<number, string> = {
 };
 
 const KO_TITLE_CACHE_KEY = "voko_ko_title_cache_v1";
+const TMDB_API_KEY = (import.meta.env.VITE_TMDB_API_KEY as string | undefined)?.trim();
 
 function normalizeTitle(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
@@ -229,6 +230,74 @@ LIMIT 1
   };
   const label = json.results?.bindings?.[0]?.label?.value;
   return label?.trim() || null;
+}
+
+async function fetchKoreanTitleFromWikipediaByTitle(rawTitle: string): Promise<string | null> {
+  const title = rawTitle.trim();
+  if (!title) return null;
+
+  const sources = ["en", "ja"] as const;
+  for (const sourceLang of sources) {
+    const endpoint =
+      `https://${sourceLang}.wikipedia.org/w/api.php?action=query&format=json&prop=langlinks` +
+      `&lllang=ko&lllimit=1&redirects=1&origin=*&titles=${encodeURIComponent(title)}`;
+    const res = await fetch(endpoint);
+    if (!res.ok) continue;
+
+    const json = (await res.json()) as {
+      query?: {
+        pages?: Record<string, { langlinks?: Array<{ "*": string }> }>;
+      };
+    };
+
+    const page = json.query?.pages
+      ? Object.values(json.query.pages).find((p) => Array.isArray(p.langlinks) && p.langlinks.length > 0)
+      : undefined;
+    const koTitle = page?.langlinks?.[0]?.["*"]?.trim();
+    if (koTitle && hasHangul(koTitle)) {
+      return koTitle;
+    }
+  }
+
+  return null;
+}
+
+async function fetchKoreanTitleFromTMDB(anime: Anime): Promise<string | null> {
+  if (!TMDB_API_KEY) return null;
+
+  const query = anime.title.english || anime.title.romaji || anime.title.native;
+  if (!query) return null;
+
+  const endpoint =
+    `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(TMDB_API_KEY)}` +
+    `&language=ko-KR&query=${encodeURIComponent(query)}&page=1&include_adult=false`;
+
+  const res = await fetch(endpoint);
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as {
+    results?: Array<{
+      media_type?: string;
+      name?: string;
+      title?: string;
+      original_name?: string;
+      original_title?: string;
+      first_air_date?: string;
+      release_date?: string;
+    }>;
+  };
+
+  const expectedYear = anime.seasonYear;
+  const candidates = (json.results ?? []).filter((item) => item.media_type === "tv" || item.media_type === "movie");
+  for (const item of candidates) {
+    const ko = item.name?.trim() || item.title?.trim();
+    const date = item.first_air_date || item.release_date || "";
+    const year = Number.parseInt(date.slice(0, 4), 10);
+    if (!ko || !hasHangul(ko)) continue;
+    if (expectedYear && Number.isFinite(year) && Math.abs(expectedYear - year) > 2) continue;
+    return ko;
+  }
+  return null;
 }
 
 function franchiseKey(anime: Anime): string {
@@ -380,6 +449,7 @@ export default function App() {
   const [finalError, setFinalError] = useState("");
   const [koTitleCache, setKoTitleCache] = useState<Record<string, string>>({});
   const lookupInFlight = useRef<Set<string>>(new Set());
+  const lookupFailed = useRef<Set<string>>(new Set());
 
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
@@ -556,7 +626,7 @@ export default function App() {
     async function resolveKoreanTitles() {
       for (const anime of visibleAnimesForKoLookup) {
         const key = cacheKey(anime);
-        if (koTitleCache[key] || lookupInFlight.current.has(key)) continue;
+        if (koTitleCache[key] || lookupInFlight.current.has(key) || lookupFailed.current.has(key)) continue;
 
         const staticMapped = titleFromStaticMap(anime);
         if (staticMapped) {
@@ -570,12 +640,40 @@ export default function App() {
           continue;
         }
 
-        if (!anime.idMal) continue;
         lookupInFlight.current.add(key);
         try {
-          const wikidataKo = await fetchKoreanTitleFromWikidata(anime.idMal);
-          if (wikidataKo) {
-            setKoTitleCache((prev) => (prev[key] ? prev : { ...prev, [key]: wikidataKo }));
+          let resolvedTitle: string | null = null;
+
+          const wikiCandidates = [anime.title.english, anime.title.romaji]
+            .filter((v): v is string => !!v)
+            .slice(0, 2);
+
+          for (const titleCandidate of wikiCandidates) {
+            const wikiKo = await fetchKoreanTitleFromWikipediaByTitle(titleCandidate);
+            if (wikiKo) {
+              resolvedTitle = wikiKo;
+              break;
+            }
+          }
+
+          if (!resolvedTitle && anime.idMal) {
+            const wikidataKo = await fetchKoreanTitleFromWikidata(anime.idMal);
+            if (wikidataKo) {
+              resolvedTitle = wikidataKo;
+            }
+          }
+
+          if (!resolvedTitle) {
+            const tmdbKo = await fetchKoreanTitleFromTMDB(anime);
+            if (tmdbKo) {
+              resolvedTitle = tmdbKo;
+            }
+          }
+
+          if (resolvedTitle) {
+            setKoTitleCache((prev) => (prev[key] ? prev : { ...prev, [key]: resolvedTitle! }));
+          } else {
+            lookupFailed.current.add(key);
           }
         } finally {
           lookupInFlight.current.delete(key);
