@@ -34,6 +34,23 @@ type FinalRecommendation = {
   reason: string;
 };
 
+type CategoryBucketPayload = {
+  trending?: { media?: Anime[] };
+  popular?: { media?: Anime[] };
+  topRated?: { media?: Anime[] };
+};
+
+type RecommendationPayload = {
+  Media?: {
+    recommendations?: {
+      nodes?: Array<{
+        rating?: number;
+        mediaRecommendation?: Anime;
+      }>;
+    };
+  };
+};
+
 const CATEGORIES: Category[] = [
   { id: "lovecom", label: "러브코미디", genre: "Romance" },
   { id: "action", label: "액션", genre: "Action" },
@@ -41,14 +58,71 @@ const CATEGORIES: Category[] = [
   { id: "thriller", label: "스릴러/미스터리", genre: "Thriller" },
 ];
 
-const CATEGORY_ANIME_QUERY = `
-query ($genreIn: [String], $page: Int, $perPage: Int, $sort: [MediaSort]) {
-  Page(page: $page, perPage: $perPage) {
+const CATEGORY_BUCKET_QUERY = `
+query ($genreIn: [String], $excludeIds: [Int], $minScore: Int, $minPopularity: Int) {
+  trending: Page(page: 1, perPage: 20) {
     media(
-      type: ANIME,
-      status_not_in: [NOT_YET_RELEASED],
-      genre_in: $genreIn,
-      sort: $sort
+      type: ANIME
+      status_not_in: [NOT_YET_RELEASED]
+      isAdult: false
+      genre_in: $genreIn
+      id_not_in: $excludeIds
+      format_in: [TV, OVA, ONA, TV_SHORT]
+      averageScore_greater: $minScore
+      popularity_greater: $minPopularity
+      sort: [TRENDING_DESC, POPULARITY_DESC]
+    ) {
+      id
+      idMal
+      format
+      title { romaji english native }
+      synonyms
+      description(asHtml: false)
+      coverImage { medium large }
+      genres
+      tags { name rank }
+      meanScore
+      popularity
+      seasonYear
+    }
+  }
+  popular: Page(page: 1, perPage: 20) {
+    media(
+      type: ANIME
+      status_not_in: [NOT_YET_RELEASED]
+      isAdult: false
+      genre_in: $genreIn
+      id_not_in: $excludeIds
+      format_in: [TV, OVA, ONA, TV_SHORT]
+      averageScore_greater: $minScore
+      popularity_greater: $minPopularity
+      sort: [POPULARITY_DESC, SCORE_DESC]
+    ) {
+      id
+      idMal
+      format
+      title { romaji english native }
+      synonyms
+      description(asHtml: false)
+      coverImage { medium large }
+      genres
+      tags { name rank }
+      meanScore
+      popularity
+      seasonYear
+    }
+  }
+  topRated: Page(page: 1, perPage: 20) {
+    media(
+      type: ANIME
+      status_not_in: [NOT_YET_RELEASED]
+      isAdult: false
+      genre_in: $genreIn
+      id_not_in: $excludeIds
+      format_in: [TV, OVA, ONA, TV_SHORT]
+      averageScore_greater: $minScore
+      popularity_greater: $minPopularity
+      sort: [SCORE_DESC, POPULARITY_DESC]
     ) {
       id
       idMal
@@ -67,17 +141,20 @@ query ($genreIn: [String], $page: Int, $perPage: Int, $sort: [MediaSort]) {
 }
 `;
 
-const CATEGORY_SORT_OPTIONS: string[][] = [
-  ["TRENDING_DESC", "POPULARITY_DESC"],
-  ["POPULARITY_DESC", "SCORE_DESC"],
-  ["FAVOURITES_DESC", "POPULARITY_DESC"],
-  ["SCORE_DESC", "POPULARITY_DESC"],
-];
-
 const FINAL_CANDIDATE_QUERY = `
-query ($genreIn: [String], $page: Int, $perPage: Int) {
+query ($genreIn: [String], $tagIn: [String], $excludeIds: [Int], $page: Int, $perPage: Int, $minimumTagRank: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, status_not_in: [NOT_YET_RELEASED], genre_in: $genreIn, sort: POPULARITY_DESC) {
+    media(
+      type: ANIME
+      status_not_in: [NOT_YET_RELEASED]
+      isAdult: false
+      genre_in: $genreIn
+      tag_in: $tagIn
+      minimumTagRank: $minimumTagRank
+      id_not_in: $excludeIds
+      format_in: [TV, OVA, ONA, TV_SHORT]
+      sort: [POPULARITY_DESC, SCORE_DESC]
+    ) {
       id
       idMal
       format
@@ -94,6 +171,39 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
   }
 }
 `;
+
+const RECOMMENDATION_QUERY = `
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    recommendations(sort: [RATING_DESC], perPage: 25) {
+      nodes {
+        rating
+        mediaRecommendation {
+          id
+          idMal
+          format
+          title { romaji english native }
+          synonyms
+          description(asHtml: false)
+          coverImage { medium large }
+          genres
+          tags { name rank }
+          meanScore
+          popularity
+          seasonYear
+        }
+      }
+    }
+  }
+}
+`;
+
+const ANILIST_ENDPOINT = "https://graphql.anilist.co";
+const ANILIST_MAX_RETRIES = 3;
+const ANILIST_BASE_RETRY_MS = 700;
+const ANILIST_REQUEST_GAP_MS = 120;
+const CATEGORY_MIN_SCORE = 62;
+const CATEGORY_MIN_POPULARITY = 8000;
 
 const KOREAN_TITLE_BY_KEY: Record<string, string> = {
   "attack on titan": "진격의 거인",
@@ -343,22 +453,102 @@ function buildKoreanSummary(anime: Anime): string {
   return `장르: ${genres.join(", ")} · 평균 평점 ${score} · ${year}`;
 }
 
-async function aniFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch("https://graphql.anilist.co", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
+function collectCategoryBuckets(payload: CategoryBucketPayload): Anime[] {
+  const merged = [
+    ...(payload.trending?.media ?? []),
+    ...(payload.popular?.media ?? []),
+    ...(payload.topRated?.media ?? []),
+  ];
+  return dedupeByFranchise(merged);
+}
+
+function extractTopTags(seeds: Anime[], limit = 8): string[] {
+  const tagMap = new Map<string, number>();
+  seeds.forEach((seed) => {
+    (seed.tags ?? []).forEach((tag) => {
+      if (!tag.name) return;
+      const weight = Math.max(10, tag.rank ?? 30);
+      tagMap.set(tag.name, (tagMap.get(tag.name) ?? 0) + weight);
+    });
   });
+  return Array.from(tagMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name]) => name);
+}
 
-  if (!res.ok) throw new Error(`AniList 요청 실패 (${res.status})`);
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
-  if (json.errors?.length) throw new Error(json.errors[0]?.message || "AniList GraphQL 오류");
-  if (!json.data) throw new Error("AniList 응답 데이터 없음");
-  return json.data;
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const asDate = Date.parse(value);
+  if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
+  return null;
+}
+
+let lastAniRequestAt = 0;
+let aniRequestQueue: Promise<void> = Promise.resolve();
+
+async function aniFetch<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  options?: { retries?: number },
+): Promise<T> {
+  const run = async (): Promise<T> => {
+    const maxRetries = options?.retries ?? ANILIST_MAX_RETRIES;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const waitGap = Math.max(0, ANILIST_REQUEST_GAP_MS - (Date.now() - lastAniRequestAt));
+      if (waitGap > 0) await sleep(waitGap);
+      lastAniRequestAt = Date.now();
+
+      const res = await fetch(ANILIST_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
+        if (json.errors?.length) {
+          const message = json.errors[0]?.message || "AniList GraphQL 오류";
+          if (attempt < maxRetries && /rate|too many|timeout|temporarily/i.test(message)) {
+            await sleep(ANILIST_BASE_RETRY_MS * 2 ** attempt);
+            continue;
+          }
+          throw new Error(message);
+        }
+        if (!json.data) throw new Error("AniList 응답 데이터 없음");
+        return json.data;
+      }
+
+      const retryable = res.status === 429 || res.status >= 500;
+      if (retryable && attempt < maxRetries) {
+        const headerDelay = parseRetryAfterMs(res.headers.get("Retry-After"));
+        const fallbackDelay = ANILIST_BASE_RETRY_MS * 2 ** attempt;
+        await sleep(Math.min(8000, headerDelay ?? fallbackDelay));
+        continue;
+      }
+
+      throw new Error(`AniList 요청 실패 (${res.status})`);
+    }
+
+    throw new Error("AniList 요청 재시도 한도를 초과했습니다.");
+  };
+
+  const request = aniRequestQueue.then(run, run);
+  aniRequestQueue = request.then(
+    () => undefined,
+    () => undefined,
+  );
+  return request;
 }
 
 function scoreCandidate(candidate: Anime, seeds: Anime[]): number {
@@ -390,9 +580,16 @@ function scoreCandidate(candidate: Anime, seeds: Anime[]): number {
   return similarity + scoreBonus + popularityBonus;
 }
 
-function buildReason(candidate: Anime, seeds: Anime[]): string {
+function buildReason(candidate: Anime, seeds: Anime[], graphSignal = 0): string {
   const seedGenreSet = new Set(seeds.flatMap((seed) => seed.genres ?? []));
   const matchedGenres = (candidate.genres ?? []).filter((genre) => seedGenreSet.has(genre));
+
+  if (graphSignal > 0) {
+    if (matchedGenres.length) {
+      return `AniList 추천 그래프 신호가 강하고 ${matchedGenres.slice(0, 2).map(toKoreanGenre).join(", ")} 장르 결도 잘 맞습니다.`;
+    }
+    return "AniList 사용자 추천 그래프에서 선택작과 함께 자주 추천되는 작품입니다.";
+  }
 
   if (matchedGenres.length >= 2) {
     return `선택한 작품들과 ${matchedGenres.slice(0, 2).map(toKoreanGenre).join(", ")} 장르 결이 강하게 맞습니다.`;
@@ -412,7 +609,6 @@ function buildReason(candidate: Anime, seeds: Anime[]): string {
 export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
   const [hoveredCategoryId, setHoveredCategoryId] = useState<string | null>(null);
-  const [categoryPage, setCategoryPage] = useState(0);
   const [seenCategoryIds, setSeenCategoryIds] = useState<number[]>([]);
   const [categoryPreviewMap, setCategoryPreviewMap] = useState<Record<string, Anime | undefined>>({});
 
@@ -460,17 +656,19 @@ export default function App() {
 
     previewInFlight.current.add(category.id);
     try {
-      const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
-        genreIn: [category.genre],
-        page: Math.floor(Math.random() * 3) + 1,
-        perPage: 18,
-        sort: CATEGORY_SORT_OPTIONS[Math.floor(Math.random() * CATEGORY_SORT_OPTIONS.length)],
-      });
-
-      const candidates = dedupeByFranchise(
-        (data.Page.media ?? []).filter((anime) => !["SPECIAL", "MUSIC"].includes(anime.format ?? "")),
+      const data = await aniFetch<CategoryBucketPayload>(
+        CATEGORY_BUCKET_QUERY,
+        {
+          genreIn: [category.genre],
+          excludeIds: [],
+          minScore: CATEGORY_MIN_SCORE,
+          minPopularity: CATEGORY_MIN_POPULARITY,
+        },
+        { retries: 2 },
       );
-      const picked = candidates[Math.floor(Math.random() * Math.max(candidates.length, 1))];
+
+      const candidates = shuffleArray(collectCategoryBuckets(data));
+      const picked = candidates[0];
       if (picked) {
         setCategoryPreviewMap((prev) => (prev[category.id] ? prev : { ...prev, [category.id]: picked }));
       }
@@ -490,49 +688,32 @@ export default function App() {
       setFinalRecs([]);
       setFinalError("");
       setSeenCategoryIds([]);
-      setCategoryPage(0);
     }
 
-    const existingSeen = new Set(mode === "reset" ? [] : seenCategoryIds);
-    const collectedMap = new Map<number, Anime>();
-    let pageCursor = mode === "reset" ? Math.floor(Math.random() * 10) + 1 : categoryPage + 1;
+    const baseSeen = mode === "reset" ? [] : seenCategoryIds;
+    const excludeIds = baseSeen.slice(-350);
 
     try {
-      for (let attempt = 0; attempt < 4 && collectedMap.size < 24; attempt++) {
-        const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
+      const strictPayload = await aniFetch<CategoryBucketPayload>(CATEGORY_BUCKET_QUERY, {
+        genreIn: [category.genre],
+        excludeIds,
+        minScore: CATEGORY_MIN_SCORE,
+        minPopularity: CATEGORY_MIN_POPULARITY,
+      });
+
+      let nextList = shuffleArray(collectCategoryBuckets(strictPayload)).slice(0, 24);
+
+      if (nextList.length < 18) {
+        const relaxedExclude = Array.from(new Set([...excludeIds, ...nextList.map((item) => item.id)])).slice(-350);
+        const relaxedPayload = await aniFetch<CategoryBucketPayload>(CATEGORY_BUCKET_QUERY, {
           genreIn: [category.genre],
-          page: pageCursor,
-          perPage: 50,
-          sort: CATEGORY_SORT_OPTIONS[(attempt + Math.floor(Math.random() * CATEGORY_SORT_OPTIONS.length)) % CATEGORY_SORT_OPTIONS.length],
+          excludeIds: relaxedExclude,
+          minScore: 0,
+          minPopularity: 0,
         });
-
-        const filtered = dedupeByFranchise(
-          (data.Page.media ?? []).filter((anime) => !["MOVIE", "SPECIAL", "MUSIC"].includes(anime.format ?? "")),
-        );
-
-        filtered.forEach((anime) => {
-          if (existingSeen.has(anime.id)) return;
-          if (collectedMap.has(anime.id)) return;
-          collectedMap.set(anime.id, anime);
-        });
-
-        pageCursor += 1;
+        nextList = shuffleArray(dedupeByFranchise([...nextList, ...collectCategoryBuckets(relaxedPayload)])).slice(0, 24);
       }
 
-      let nextList = shuffleArray(Array.from(collectedMap.values())).slice(0, 24);
-      if (!nextList.length) {
-        const fallback = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
-          genreIn: [category.genre],
-          page: 1,
-          perPage: 50,
-          sort: ["POPULARITY_DESC", "SCORE_DESC"],
-        });
-        nextList = shuffleArray(
-          dedupeByFranchise(
-            (fallback.Page.media ?? []).filter((anime) => !["MOVIE", "SPECIAL", "MUSIC"].includes(anime.format ?? "")),
-          ),
-        ).slice(0, 24);
-      }
       if (!nextList.length) setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
 
       setCategoryAnimes(nextList);
@@ -543,7 +724,6 @@ export default function App() {
         const base = mode === "reset" ? [] : prev;
         return Array.from(new Set([...base, ...nextList.map((a) => a.id)]));
       });
-      setCategoryPage(pageCursor - 1);
     } catch (error) {
       setCategoryError(error instanceof Error ? error.message : "카테고리 로딩 실패");
     } finally {
@@ -573,20 +753,65 @@ export default function App() {
     setFinalError("");
 
     try {
+      const allowedFormats = new Set(["TV", "OVA", "ONA", "TV_SHORT"]);
       const topGenres = Array.from(new Set(pickedBaseAnimes.flatMap((s) => s.genres ?? []))).slice(0, 5);
-      const data = await aniFetch<{ Page: { media: Anime[] } }>(FINAL_CANDIDATE_QUERY, {
+      const topTags = extractTopTags(pickedBaseAnimes, 6);
+      const seedSet = new Set(pickedBaseAnimes.map((item) => item.id));
+      const seedIds = Array.from(seedSet);
+
+      const graphScoreById = new Map<number, number>();
+      const graphCandidates = new Map<number, Anime>();
+
+      const graphResponses = await Promise.all(
+        seedIds.slice(0, 4).map((id) =>
+          aniFetch<RecommendationPayload>(RECOMMENDATION_QUERY, { id }, { retries: 2 }),
+        ),
+      );
+
+      graphResponses.forEach((response) => {
+        (response.Media?.recommendations?.nodes ?? []).forEach((node) => {
+          const candidate = node.mediaRecommendation;
+          if (!candidate || seedSet.has(candidate.id)) return;
+          if (candidate.format && !allowedFormats.has(candidate.format)) return;
+
+          const rawSignal = Math.max(0, node.rating ?? 0);
+          const normalizedGraphSignal = Math.log10(rawSignal + 1) * 12;
+
+          graphScoreById.set(candidate.id, (graphScoreById.get(candidate.id) ?? 0) + normalizedGraphSignal);
+          if (!graphCandidates.has(candidate.id)) graphCandidates.set(candidate.id, candidate);
+        });
+      });
+
+      const finalVariables: Record<string, unknown> = {
         genreIn: topGenres.length ? topGenres : [selectedCategory.genre],
         page: 1,
         perPage: 80,
-      });
+        excludeIds: seedIds,
+      };
+      if (topTags.length) {
+        finalVariables.tagIn = topTags;
+        finalVariables.minimumTagRank = 35;
+      }
 
-      const seedSet = new Set(pickedBaseAnimes.map((item) => item.id));
-      const ranked = dedupeByFranchise(data.Page.media ?? [])
+      const fallbackData = await aniFetch<{ Page: { media: Anime[] } }>(FINAL_CANDIDATE_QUERY, finalVariables);
+      const mergedCandidates = new Map<number, Anime>();
+      graphCandidates.forEach((anime) => mergedCandidates.set(anime.id, anime));
+      dedupeByFranchise(fallbackData.Page.media ?? [])
+        .filter((anime) => !seedSet.has(anime.id))
+        .forEach((anime) => {
+          if (!mergedCandidates.has(anime.id)) mergedCandidates.set(anime.id, anime);
+        });
+
+      const ranked = dedupeByFranchise(Array.from(mergedCandidates.values()))
         .filter((anime) => !seedSet.has(anime.id))
         .map((anime) => ({
           anime,
-          score: scoreCandidate(anime, pickedBaseAnimes),
-          reason: buildReason(anime, pickedBaseAnimes),
+          score:
+            scoreCandidate(anime, pickedBaseAnimes) +
+            (graphScoreById.get(anime.id) ?? 0) +
+            ((anime.meanScore ?? 65) - 60) * 0.4 +
+            Math.min(8, Math.log10((anime.popularity ?? 1) + 1) * 3),
+          reason: buildReason(anime, pickedBaseAnimes, graphScoreById.get(anime.id) ?? 0),
         }))
         .sort((a, b) => b.score - a.score)
         .slice(0, 4);
@@ -635,20 +860,22 @@ export default function App() {
         try {
           let resolvedTitle: string | null = null;
 
+          if (anime.idMal) {
+            const wikidataKo = await fetchKoreanTitleFromWikidata(anime.idMal);
+            if (wikidataKo) resolvedTitle = wikidataKo;
+          }
+
           const wikiCandidates = [anime.title.english, anime.title.romaji]
             .filter((v): v is string => !!v)
             .slice(0, 2);
-          for (const titleCandidate of wikiCandidates) {
-            const wikiKo = await fetchKoreanTitleFromWikipediaByTitle(titleCandidate);
-            if (wikiKo) {
-              resolvedTitle = wikiKo;
-              break;
+          if (!resolvedTitle) {
+            for (const titleCandidate of wikiCandidates) {
+              const wikiKo = await fetchKoreanTitleFromWikipediaByTitle(titleCandidate);
+              if (wikiKo) {
+                resolvedTitle = wikiKo;
+                break;
+              }
             }
-          }
-
-          if (!resolvedTitle && anime.idMal) {
-            const wikidataKo = await fetchKoreanTitleFromWikidata(anime.idMal);
-            if (wikidataKo) resolvedTitle = wikidataKo;
           }
 
           if (!resolvedTitle) {
@@ -720,6 +947,7 @@ export default function App() {
       {!!categoryAnimes.length && (
         <section className="panel">
           <h2>STEP 2. 재밌게 본 애니 고르기 (최대 6개)</h2>
+          <p className="source-note">트렌딩/인기/평점 버킷에서 중복 제거 후 보여줍니다.</p>
           <div className="step2-topbar">
             <p className="picked-count">선택됨: {pickedBaseAnimes.length}/6</p>
             <button
@@ -779,6 +1007,7 @@ export default function App() {
       {!!finalRecs.length && (
         <section className="panel result-panel motion-in">
           <h2>최종 추천 4작품</h2>
+          <p className="source-note">AniList 추천 그래프 신호 + 장르/태그 유사도 기반 결과입니다.</p>
           <div className="grid cards result-grid">
             {finalRecs.map((item) => (
               <article key={item.anime.id} className="anime-card result large">
@@ -804,7 +1033,7 @@ export default function App() {
       )}
 
       <footer className="footer-note">
-        <p>Data by AniList API · 한글 제목은 캐시/동의어/외부 무료 소스로 보강됩니다.</p>
+        <p>Data by AniList API · 한글 제목은 ID 기반(Wikidata) 우선으로 보강됩니다.</p>
       </footer>
     </div>
   );
