@@ -26,6 +26,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
+      <head>
+        {/* Google tag (gtag.js) */}
+        <script
+          async
+          src="https://www.googletagmanager.com/gtag/js?id=G-1WFFEZEZVM"
+        />
+        <script>{`
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1WFFEZEZVM');
+`}</script>
+      </head>
       <body className={`${spaceGrotesk.variable} ${vt323.variable}`}>
         {children}
       </body>
