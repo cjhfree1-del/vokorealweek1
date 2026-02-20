@@ -4,6 +4,9 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
 import { enforceRateLimit } from "./lib/rateLimit";
 import { verifyIdentityWithProvider } from "./lib/identityProvider";
+import { createAnalysisRequest } from "./handlers/createAnalysisRequest";
+import { onAnalysisRequestCreated } from "./handlers/onAnalysisRequestCreated";
+import { cleanupExpiredFiles } from "./jobs/cleanupExpiredFiles";
 
 initializeApp();
 const db = getFirestore();
@@ -109,3 +112,9 @@ export const reportContent = onCall(async (request) => {
 
   return { success: true };
 });
+
+export {
+  createAnalysisRequest,
+  onAnalysisRequestCreated,
+  cleanupExpiredFiles,
+};
