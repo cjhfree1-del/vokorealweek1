@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 type CheckLevel = "PASS" | "CAUTION" | "BLOCK";
 
@@ -123,6 +123,21 @@ export default function App() {
   const [result, setResult] = useState<CheckResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function handleSelectedFile(file: File | null) {
+    if (!file) return;
+
+    const extension = file.name.toLowerCase().split(".").pop() ?? "";
+    if (!["wav", "mp3"].includes(extension)) {
+      setErrorMessage("지원 파일은 WAV 또는 MP3만 가능합니다.");
+      return;
+    }
+
+    setErrorMessage("");
+    setSampleFile(file);
+  }
 
   async function handleAnalyze() {
     if (!sampleFile) {
@@ -139,6 +154,10 @@ export default function App() {
     setResult(nextResult);
     setViewMode("result");
     setIsAnalyzing(false);
+  }
+
+  function openFilePicker() {
+    fileInputRef.current?.click();
   }
 
   function resetToInput() {
@@ -169,15 +188,44 @@ export default function App() {
               </select>
             </label>
 
-            <label className="label">
-              샘플 파일 업로드 (wav, mp3)
+            <label className="label" htmlFor="sample-file-input">
+              샘플 파일 업로드 (drag & paste / wav, mp3)
               <input
+                ref={fileInputRef}
+                id="sample-file-input"
                 className="input"
                 type="file"
                 accept=".wav,.mp3,audio/wav,audio/mpeg"
-                onChange={(e) => setSampleFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => handleSelectedFile(e.target.files?.[0] ?? null)}
+                hidden
               />
             </label>
+
+            <div
+              className={`dropzone ${isDragging ? "dragging" : ""}`}
+              tabIndex={0}
+              role="button"
+              onClick={openFilePicker}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
+              }}
+              onPaste={(e) => {
+                handleSelectedFile(e.clipboardData.files?.[0] ?? null);
+              }}
+            >
+              <p className="drop-title">파일을 여기로 드래그하거나 붙여넣기(Ctrl+V)</p>
+              <p className="muted">또는 클릭해서 파일 선택</p>
+            </div>
 
             {sampleFile && (
               <p className="muted">선택 파일: {sampleFile.name}</p>
