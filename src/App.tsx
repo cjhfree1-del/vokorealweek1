@@ -23,11 +23,6 @@ type Category = {
   id: string;
   label: string;
   genre: string;
-  subcategories: Array<{
-    id: string;
-    label: string;
-    tag?: string;
-  }>;
 };
 
 const CATEGORIES: Category[] = [
@@ -35,56 +30,31 @@ const CATEGORIES: Category[] = [
     id: "lovecom",
     label: "러브코미디",
     genre: "Romance",
-    subcategories: [
-      { id: "school-love", label: "학원물", tag: "School" },
-      { id: "tsundere", label: "츤데레", tag: "Tsundere" },
-      { id: "harem", label: "하렘", tag: "Harem" },
-      { id: "wholesome", label: "달달함", tag: "Cute Girls Doing Cute Things" },
-    ],
   },
   {
     id: "action",
     label: "액션",
     genre: "Action",
-    subcategories: [
-      { id: "battle", label: "배틀물", tag: "Shounen" },
-      { id: "superpower", label: "초능력", tag: "Super Power" },
-      { id: "military", label: "밀리터리", tag: "Military" },
-      { id: "samurai", label: "검/사무라이", tag: "Samurai" },
-    ],
   },
   {
     id: "fantasy",
     label: "판타지",
     genre: "Fantasy",
-    subcategories: [
-      { id: "isekai", label: "이세계", tag: "Isekai" },
-      { id: "magic", label: "마법", tag: "Magic" },
-      { id: "adventure", label: "모험", tag: "Adventure" },
-      { id: "dark-fantasy", label: "다크판타지", tag: "Dark Fantasy" },
-    ],
   },
   {
     id: "thriller",
     label: "스릴러/미스터리",
     genre: "Thriller",
-    subcategories: [
-      { id: "mystery", label: "미스터리", tag: "Detective" },
-      { id: "psychological", label: "심리전", tag: "Psychological" },
-      { id: "time-loop", label: "타임루프", tag: "Time Manipulation" },
-      { id: "survival", label: "생존", tag: "Survival" },
-    ],
   },
 ];
 
 const CATEGORY_ANIME_QUERY = `
-query ($genreIn: [String], $tagIn: [String], $page: Int, $perPage: Int) {
+query ($genreIn: [String], $page: Int, $perPage: Int) {
   Page(page: $page, perPage: $perPage) {
     media(
       type: ANIME,
       status_not_in: [NOT_YET_RELEASED],
       genre_in: $genreIn,
-      tag_in: $tagIn,
       sort: [POPULARITY_DESC, SCORE_DESC]
     ) {
       id
@@ -143,13 +113,35 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
 `;
 
 function getTitle(anime: Anime): string {
-  return anime.title.english || anime.title.romaji || anime.title.native || `Anime #${anime.id}`;
+  return anime.title.native || anime.title.romaji || anime.title.english || `Anime #${anime.id}`;
 }
 
-function trimDescription(description?: string): string {
-  if (!description) return "설명 정보가 없습니다.";
-  const cleaned = description.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-  return cleaned.length > 120 ? `${cleaned.slice(0, 120)}...` : cleaned;
+function toKoreanGenre(genre: string): string {
+  const map: Record<string, string> = {
+    Action: "액션",
+    Adventure: "모험",
+    Comedy: "코미디",
+    Romance: "로맨스",
+    Fantasy: "판타지",
+    Thriller: "스릴러",
+    Mystery: "미스터리",
+    Drama: "드라마",
+    SciFi: "SF",
+    "Slice of Life": "일상",
+    Supernatural: "초자연",
+    Horror: "호러",
+  };
+  return map[genre] ?? genre;
+}
+
+function buildKoreanSummary(anime: Anime): string {
+  const genres = (anime.genres ?? []).slice(0, 3).map(toKoreanGenre);
+  const score = anime.meanScore ?? "-";
+  const year = anime.seasonYear ? `${anime.seasonYear}년작` : "연도 정보 없음";
+  if (!genres.length) {
+    return `평균 평점 ${score} · ${year}`;
+  }
+  return `장르: ${genres.join(", ")} · 평균 평점 ${score} · ${year}`;
 }
 
 async function aniFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -208,7 +200,6 @@ function scoreCandidate(candidate: Anime, seeds: Anime[]): number {
 
 export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
-  const [selectedSubId, setSelectedSubId] = useState<string>(CATEGORIES[0].subcategories[0].id);
 
   const [categoryAnimes, setCategoryAnimes] = useState<Anime[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(false);
@@ -227,11 +218,6 @@ export default function App() {
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
     [selectedCategoryId],
-  );
-
-  const selectedSub = useMemo(
-    () => selectedCategory.subcategories.find((s) => s.id === selectedSubId) ?? selectedCategory.subcategories[0],
-    [selectedCategory, selectedSubId],
   );
 
   const animeMap = useMemo(() => {
@@ -253,7 +239,6 @@ export default function App() {
     try {
       const data = await aniFetch<{ Page: { media: Anime[] } }>(CATEGORY_ANIME_QUERY, {
         genreIn: [selectedCategory.genre],
-        tagIn: selectedSub?.tag ? [selectedSub.tag] : undefined,
         page: 1,
         perPage: 18,
       });
@@ -363,7 +348,7 @@ export default function App() {
       <header className="hero">
         <p className="kicker">OTAKU MATCHMAKER</p>
         <h1>취향 고르면, 딱 맞는 다음 애니를 추천해줄게</h1>
-        <p>카테고리 → 세부취향 → 재밌게 본 애니 선택 순서로 추천 정확도를 끌어올립니다.</p>
+        <p>카테고리 → 재밌게 본 애니 선택 → 비슷한 애니 추가 선택 순서로 추천합니다.</p>
       </header>
 
       <section className="panel flow-panel">
@@ -372,10 +357,9 @@ export default function App() {
           {CATEGORIES.map((category) => (
             <button
               key={category.id}
-              className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
+                className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
               onClick={() => {
                 setSelectedCategoryId(category.id);
-                setSelectedSubId(category.subcategories[0].id);
                 setCategoryAnimes([]);
                 setPickedBaseIds([]);
                 setSimilarAnimes([]);
@@ -384,26 +368,6 @@ export default function App() {
               }}
             >
               {category.label}
-            </button>
-          ))}
-        </div>
-
-        <h3>세부 카테고리</h3>
-        <div className="chip-group sub">
-          {selectedCategory.subcategories.map((sub) => (
-            <button
-              key={sub.id}
-              className={`chip-btn sub-chip ${selectedSubId === sub.id ? "active" : ""}`}
-              onClick={() => {
-                setSelectedSubId(sub.id);
-                setCategoryAnimes([]);
-                setPickedBaseIds([]);
-                setSimilarAnimes([]);
-                setPickedSimilarIds([]);
-                setFinalRecs([]);
-              }}
-            >
-              {sub.label}
             </button>
           ))}
         </div>
@@ -427,7 +391,7 @@ export default function App() {
                 <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
                 <div>
                   <h4>{getTitle(anime)}</h4>
-                  <p>{trimDescription(anime.description)}</p>
+                  <p>{buildKoreanSummary(anime)}</p>
                   <div className="meta-row">
                     <span>★ {anime.meanScore ?? "-"}</span>
                     <span>{anime.seasonYear ?? "-"}</span>
@@ -456,7 +420,7 @@ export default function App() {
                 <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
                 <div>
                   <h4>{getTitle(anime)}</h4>
-                  <p>{trimDescription(anime.description)}</p>
+                  <p>{buildKoreanSummary(anime)}</p>
                 </div>
               </article>
             ))}
@@ -478,7 +442,7 @@ export default function App() {
                 <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
                 <div>
                   <h4>{getTitle(anime)}</h4>
-                  <p>{trimDescription(anime.description)}</p>
+                  <p>{buildKoreanSummary(anime)}</p>
                   <div className="meta-row">
                     <span>평점 {anime.meanScore ?? "-"}</span>
                     <span>인기 {anime.popularity ?? "-"}</span>
