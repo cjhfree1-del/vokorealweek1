@@ -599,13 +599,6 @@ export default function App() {
     }
   }
 
-  const previewCategoryId = hoveredCategoryId ?? selectedCategoryId;
-  const previewCategory = useMemo(
-    () => CATEGORIES.find((category) => category.id === previewCategoryId) ?? CATEGORIES[0],
-    [previewCategoryId],
-  );
-  const previewAnime = categoryPreviewMap[previewCategoryId];
-
   useEffect(() => {
     void ensureCategoryPreview(selectedCategory);
   }, [selectedCategory]);
@@ -688,42 +681,37 @@ export default function App() {
       <section className="flow-panel step1-panel">
         <h2>STEP 1. 카테고리 선택</h2>
         <div className="chip-group" onMouseLeave={() => setHoveredCategoryId(null)}>
-          {CATEGORIES.map((category) => (
-            <button
-              key={category.id}
-              className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
-              onMouseEnter={() => {
-                setHoveredCategoryId(category.id);
-                void ensureCategoryPreview(category);
-              }}
-              onFocus={() => {
-                setHoveredCategoryId(category.id);
-                void ensureCategoryPreview(category);
-              }}
-              onClick={() => {
-                setSelectedCategoryId(category.id);
-                void fetchCategoryAnimes(category, "reset");
-              }}
-            >
-              {category.label}
-            </button>
-          ))}
-        </div>
-        <div className="category-preview">
-          {previewAnime ? (
-            <>
-              <img
-                src={previewAnime.coverImage?.large || previewAnime.coverImage?.medium || ""}
-                alt={`${previewCategory.label} 대표작`}
-              />
-              <div className="category-preview-meta">
-                <strong>{previewCategory.label} 대표작</strong>
-                <span>{getTitle(previewAnime, koTitleCache)}</span>
-              </div>
-            </>
-          ) : (
-            <p>{previewCategory.label} 카테고리에 마우스를 올리면 대표작 썸네일이 표시됩니다.</p>
-          )}
+          {CATEGORIES.map((category) => {
+            const preview = categoryPreviewMap[category.id];
+            const isPreviewVisible = hoveredCategoryId === category.id;
+            return (
+              <button
+                key={category.id}
+                className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
+                onMouseEnter={() => {
+                  setHoveredCategoryId(category.id);
+                  void ensureCategoryPreview(category);
+                }}
+                onFocus={() => {
+                  setHoveredCategoryId(category.id);
+                  void ensureCategoryPreview(category);
+                }}
+                onClick={() => {
+                  setSelectedCategoryId(category.id);
+                  void fetchCategoryAnimes(category, "reset");
+                }}
+              >
+                <span className="chip-label">{category.label}</span>
+                <span className={`chip-preview ${isPreviewVisible ? "show" : ""}`}>
+                  {preview ? (
+                    <img src={preview.coverImage?.large || preview.coverImage?.medium || ""} alt={`${category.label} 대표작`} />
+                  ) : (
+                    <span className="chip-preview-loading">대표작 불러오는 중...</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
         {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
