@@ -1,412 +1,444 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useMemo, useState } from "react";
 
-type CheckLevel = "PASS" | "CAUTION" | "BLOCK";
+type Preference = "love" | "neutral" | "dislike";
 
-type CheckResult = {
-  level: CheckLevel;
-  score: number;
-  reasons: string[];
-  action: string;
-  breakdown: {
-    similarityRisk: number;
-    aiSignalRisk: number;
-    loopIntensityRisk: number;
-    vocalPresence: "낮음" | "중간" | "높음";
+type Anime = {
+  id: number;
+  title: {
+    romaji?: string;
+    english?: string;
+    native?: string;
   };
-  fileName: string;
-  fileType: string;
-  fileSizeMb: string;
-  durationSec: string;
-  platform: string;
+  description?: string;
+  coverImage?: {
+    large?: string;
+    medium?: string;
+  };
+  genres?: string[];
+  tags?: Array<{
+    name?: string;
+    rank?: number;
+  }>;
+  meanScore?: number;
+  popularity?: number;
+  seasonYear?: number;
 };
 
-type ViewMode = "input" | "result";
-const ANALYSIS_STAGES = [
-  "Audio fingerprint 생성 중...",
-  "플랫폼 정책 기준 매칭 중...",
-  "유사 패턴 탐지 중...",
-] as const;
+type SeedItem = {
+  anime: Anime;
+  preference: Preference;
+};
 
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+type RecommendationItem = {
+  anime: Anime;
+  score: number;
+  matchedGenres: string[];
+  matchedTags: string[];
+  why: string;
+};
+
+type RecommendationRails = {
+  directHits: RecommendationItem[];
+  hiddenGems: RecommendationItem[];
+  freshPicks: RecommendationItem[];
+};
+
+const SEARCH_QUERY = `
+query ($search: String, $page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    media(search: $search, type: ANIME, sort: POPULARITY_DESC) {
+      id
+      title { romaji english native }
+      description(asHtml: false)
+      coverImage { medium large }
+      genres
+      tags { name rank }
+      meanScore
+      popularity
+      seasonYear
+    }
+  }
+}
+`;
+
+const CANDIDATE_QUERY = `
+query ($genreIn: [String], $page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    media(type: ANIME, status_not_in: [NOT_YET_RELEASED], genre_in: $genreIn, sort: POPULARITY_DESC) {
+      id
+      title { romaji english native }
+      description(asHtml: false)
+      coverImage { medium large }
+      genres
+      tags { name rank }
+      meanScore
+      popularity
+      seasonYear
+    }
+  }
+}
+`;
+
+function getTitle(anime: Anime): string {
+  return anime.title.english || anime.title.romaji || anime.title.native || `Anime #${anime.id}`;
 }
 
-function getAudioDuration(file: File): Promise<number> {
-  return new Promise((resolve) => {
-    const audio = document.createElement("audio");
-    const url = URL.createObjectURL(file);
-
-    audio.preload = "metadata";
-    audio.onloadedmetadata = () => {
-      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      URL.revokeObjectURL(url);
-      resolve(duration);
-    };
-
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(0);
-    };
-
-    audio.src = url;
-  });
+function cleanDescription(input?: string): string {
+  if (!input) return "설명 정보가 없습니다.";
+  const stripped = input.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+  return stripped.length > 180 ? `${stripped.slice(0, 180)}...` : stripped;
 }
 
-function evaluateSample(file: File, duration: number, platform: string): CheckResult {
-  let score = 10;
-  const reasons: string[] = [];
+async function aniListFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const response = await fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
 
-  const extension = file.name.toLowerCase().split(".").pop() ?? "";
-  const fileSizeMb = file.size / (1024 * 1024);
-  const similarityRisk = Math.min(
-    100,
-    Math.round((duration > 0 && duration < 4 ? 30 : 12) + (fileSizeMb < 0.1 ? 28 : 10)),
-  );
-  const aiSignalRisk = Math.min(
-    100,
-    Math.round((file.type === "" || file.type === "application/octet-stream" ? 34 : 14) + (platform === "multi" ? 15 : 7)),
-  );
-  const loopIntensityRisk = Math.min(
-    100,
-    Math.round(duration > 0 && duration < 2.5 ? 45 : duration > 0 && duration < 8 ? 23 : 9),
-  );
-  const vocalPresence: "낮음" | "중간" | "높음" =
-    duration > 40 ? "높음" : duration > 20 ? "중간" : "낮음";
-
-  if (!["wav", "mp3"].includes(extension)) {
-    score += 25;
-    reasons.push("지원 권장 포맷(wav/mp3) 외 파일입니다.");
+  if (!response.ok) {
+    throw new Error(`AniList request failed: ${response.status}`);
   }
 
-  if (duration > 0 && duration < 2.5) {
-    score += 18;
-    reasons.push("길이가 매우 짧아 루프/원샷 샘플일 가능성이 있습니다.");
+  const body = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
+  if (body.errors?.length) {
+    throw new Error(body.errors[0]?.message || "AniList GraphQL error");
+  }
+  if (!body.data) {
+    throw new Error("AniList data is empty");
   }
 
-  if (fileSizeMb < 0.08) {
-    score += 16;
-    reasons.push("파일 용량이 매우 작아 재사용 샘플 가능성이 있습니다.");
-  }
+  return body.data;
+}
 
-  if (file.type === "" || file.type === "application/octet-stream") {
-    score += 14;
-    reasons.push("MIME 정보가 불명확해 출처/인코딩 검증이 필요합니다.");
-  }
+function weightFromPreference(preference: Preference): number {
+  if (preference === "love") return 1.8;
+  if (preference === "neutral") return 1;
+  return -1.2;
+}
 
-  if (platform === "multi") {
-    score += 8;
-    reasons.push("멀티 배포는 플랫폼별 정책 차이로 심사가 더 보수적일 수 있습니다.");
-  }
+function buildRecommendations(seedItems: SeedItem[], candidates: Anime[]): RecommendationRails {
+  const positiveSeeds = seedItems.filter((item) => item.preference !== "dislike");
+  const genreWeight = new Map<string, number>();
+  const tagWeight = new Map<string, number>();
 
-  score = Math.min(100, score);
+  seedItems.forEach((item) => {
+    const w = weightFromPreference(item.preference);
+    (item.anime.genres ?? []).forEach((genre) => {
+      genreWeight.set(genre, (genreWeight.get(genre) ?? 0) + w);
+    });
 
-  if (!reasons.length) {
-    reasons.push("기본 파일 신호 기준으로 즉시 차단 위험은 낮아 보입니다.");
-  }
+    (item.anime.tags ?? []).forEach((tag) => {
+      if (!tag.name) return;
+      const rankWeight = (tag.rank ?? 50) / 100;
+      tagWeight.set(tag.name, (tagWeight.get(tag.name) ?? 0) + w * rankWeight);
+    });
+  });
 
-  if (score >= 70) {
-    return {
-      level: "BLOCK",
-      score,
-      reasons,
-      action: "배포를 멈추고 샘플 라이선스/출처 문서를 먼저 확보하세요.",
-      breakdown: {
-        similarityRisk,
-        aiSignalRisk,
-        loopIntensityRisk,
-        vocalPresence,
-      },
-      fileName: file.name,
-      fileType: file.type || "unknown",
-      fileSizeMb: fileSizeMb.toFixed(2),
-      durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
-      platform,
-    };
-  }
+  const seedIds = new Set(seedItems.map((item) => item.anime.id));
+  const scored = candidates
+    .filter((anime) => !seedIds.has(anime.id))
+    .map((anime) => {
+      const genres = anime.genres ?? [];
+      const tags = (anime.tags ?? []).map((t) => t.name).filter((v): v is string => !!v);
 
-  if (score >= 40) {
-    return {
-      level: "CAUTION",
-      score,
-      reasons,
-      action: "배포 전 클리어런스 증빙 문서와 샘플 출처를 추가 확인하세요.",
-      breakdown: {
-        similarityRisk,
-        aiSignalRisk,
-        loopIntensityRisk,
-        vocalPresence,
-      },
-      fileName: file.name,
-      fileType: file.type || "unknown",
-      fileSizeMb: fileSizeMb.toFixed(2),
-      durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
-      platform,
-    };
-  }
+      let similarity = 0;
+      const matchedGenres = genres.filter((g) => (genreWeight.get(g) ?? 0) > 0);
+      matchedGenres.forEach((g) => {
+        similarity += (genreWeight.get(g) ?? 0) * 9;
+      });
+
+      const matchedTags = tags.filter((t) => (tagWeight.get(t) ?? 0) > 0).slice(0, 6);
+      matchedTags.forEach((t) => {
+        similarity += (tagWeight.get(t) ?? 0) * 6;
+      });
+
+      const qualityBonus = ((anime.meanScore ?? 60) - 50) * 0.5;
+      const popularityBonus = Math.min(18, Math.log10((anime.popularity ?? 1) + 1) * 6);
+      const score = similarity + qualityBonus + popularityBonus;
+
+      const why =
+        matchedGenres.length || matchedTags.length
+          ? `${matchedGenres.slice(0, 2).join(", ")}${matchedTags[0] ? ` + ${matchedTags[0]}` : ""} 성향이 유사해서 추천`
+          : "시드와 완전 동일하진 않지만 점수/품질 기반으로 추천";
+
+      return {
+        anime,
+        score,
+        matchedGenres,
+        matchedTags,
+        why,
+      } satisfies RecommendationItem;
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const directHits = scored
+    .filter((item) => item.matchedGenres.length >= 2 || item.matchedTags.length >= 2)
+    .slice(0, 8);
+
+  const hiddenGems = scored
+    .filter((item) => (item.anime.popularity ?? 0) < 50000 && (item.anime.meanScore ?? 0) >= 75)
+    .slice(0, 8);
+
+  const seedGenres = new Set(positiveSeeds.flatMap((s) => s.anime.genres ?? []));
+  const freshPicks = scored
+    .filter((item) => (item.anime.genres ?? []).some((g) => !seedGenres.has(g)))
+    .slice(0, 8);
 
   return {
-    level: "PASS",
-    score,
-    reasons,
-    action: "현재 신호 기준 리스크는 낮지만, 상업 배포 전 권리 검토는 유지하세요.",
-    breakdown: {
-      similarityRisk,
-      aiSignalRisk,
-      loopIntensityRisk,
-      vocalPresence,
-    },
-    fileName: file.name,
-    fileType: file.type || "unknown",
-    fileSizeMb: fileSizeMb.toFixed(2),
-    durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
-    platform,
+    directHits: directHits.length ? directHits : scored.slice(0, 8),
+    hiddenGems: hiddenGems.length ? hiddenGems : scored.slice(8, 16),
+    freshPicks: freshPicks.length ? freshPicks : scored.slice(16, 24),
   };
 }
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>("input");
-  const [platform, setPlatform] = useState("spotify");
-  const [sampleFile, setSampleFile] = useState<File | null>(null);
-  const [result, setResult] = useState<CheckResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [analysisStage, setAnalysisStage] = useState("");
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchResults, setSearchResults] = useState<Anime[]>([]);
 
-  function handleSelectedFile(file: File | null) {
-    if (!file) return;
+  const [selectedSeeds, setSelectedSeeds] = useState<SeedItem[]>([]);
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [recommendError, setRecommendError] = useState("");
+  const [rails, setRails] = useState<RecommendationRails | null>(null);
 
-    const extension = file.name.toLowerCase().split(".").pop() ?? "";
-    if (!["wav", "mp3"].includes(extension)) {
-      setErrorMessage("지원 파일은 WAV 또는 MP3만 가능합니다.");
+  const selectedSeedIds = useMemo(
+    () => new Set(selectedSeeds.map((item) => item.anime.id)),
+    [selectedSeeds],
+  );
+
+  async function runSearch() {
+    if (!searchInput.trim()) return;
+    setSearchLoading(true);
+    setSearchError("");
+
+    try {
+      const data = await aniListFetch<{ Page: { media: Anime[] } }>(SEARCH_QUERY, {
+        search: searchInput.trim(),
+        page: 1,
+        perPage: 12,
+      });
+      setSearchResults(data.Page.media ?? []);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "검색 중 오류가 발생했습니다.");
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  function addSeed(anime: Anime) {
+    if (selectedSeedIds.has(anime.id)) return;
+    if (selectedSeeds.length >= 10) return;
+    setSelectedSeeds((prev) => [...prev, { anime, preference: "love" }]);
+    setRails(null);
+  }
+
+  function removeSeed(id: number) {
+    setSelectedSeeds((prev) => prev.filter((item) => item.anime.id !== id));
+    setRails(null);
+  }
+
+  function updatePreference(id: number, preference: Preference) {
+    setSelectedSeeds((prev) =>
+      prev.map((item) => (item.anime.id === id ? { ...item, preference } : item)),
+    );
+    setRails(null);
+  }
+
+  async function recommend() {
+    if (selectedSeeds.length < 3) {
+      setRecommendError("최소 3개 이상의 애니를 선택해 주세요.");
       return;
     }
 
-    setErrorMessage("");
-    setSampleFile(file);
-  }
+    setRecommendError("");
+    setRecommendLoading(true);
 
-  async function handleAnalyze() {
-    if (!sampleFile) {
-      setErrorMessage("WAV 또는 MP3 파일을 먼저 업로드하세요.");
-      return;
+    try {
+      const topGenres = Array.from(
+        new Set(selectedSeeds.flatMap((item) => item.anime.genres ?? [])),
+      ).slice(0, 5);
+
+      const data = await aniListFetch<{ Page: { media: Anime[] } }>(CANDIDATE_QUERY, {
+        genreIn: topGenres.length ? topGenres : undefined,
+        page: 1,
+        perPage: 50,
+      });
+
+      const nextRails = buildRecommendations(selectedSeeds, data.Page.media ?? []);
+      setRails(nextRails);
+    } catch (error) {
+      setRecommendError(error instanceof Error ? error.message : "추천 생성 중 오류가 발생했습니다.");
+    } finally {
+      setRecommendLoading(false);
     }
-
-    setErrorMessage("");
-    setIsAnalyzing(true);
-    setAnalysisStage(ANALYSIS_STAGES[0]);
-
-    const duration = await getAudioDuration(sampleFile);
-    await wait(700);
-    setAnalysisStage(ANALYSIS_STAGES[1]);
-    await wait(800);
-    setAnalysisStage(ANALYSIS_STAGES[2]);
-    await wait(700);
-    const nextResult = evaluateSample(sampleFile, duration, platform);
-
-    setResult(nextResult);
-    setViewMode("result");
-    setIsAnalyzing(false);
-    setAnalysisStage("");
-  }
-
-  function openFilePicker() {
-    fileInputRef.current?.click();
-  }
-
-  function handleUploadBlockDragOver(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(true);
-  }
-
-  function handleUploadBlockDragLeave(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(false);
-  }
-
-  function handleUploadBlockDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setIsDragging(false);
-    handleSelectedFile(e.dataTransfer.files?.[0] ?? null);
-  }
-
-  function handleUploadBlockPaste(e: ClipboardEvent<HTMLDivElement>) {
-    handleSelectedFile(e.clipboardData.files?.[0] ?? null);
-  }
-
-  function resetToInput() {
-    setViewMode("input");
-    setErrorMessage("");
   }
 
   return (
     <div className="page">
-      <header className="hero card">
-        <p className="kicker">VOKO SAMPLE RISK CHECKER</p>
-        <h1>샘플 수익화 리스크 사전 점검</h1>
-        <p className="muted">파일 업로드 후 플랫폼 배포 리스크를 빠르게 확인합니다.</p>
+      <header className="hero">
+        <p className="eyebrow">ANIMATCH LAB</p>
+        <h1>봤던 애니만 고르면, 취향 맞춤 추천을 뽑아드립니다</h1>
+        <p>
+          AniList 무료 데이터 기반으로 <strong>취향 직격</strong>, <strong>숨은 명작</strong>,
+          <strong> 새로움 추천</strong>을 동시에 제공합니다.
+        </p>
       </header>
 
-      {viewMode === "input" && (
-        <main className="stack">
-          <section className="card form-card">
-            <h2>샘플 정보 입력</h2>
+      <section className="panel search-panel">
+        <h2>1) 봤던 애니 검색</h2>
+        <div className="search-row">
+          <input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                void runSearch();
+              }
+            }}
+            placeholder="예: Attack on Titan, Steins;Gate"
+          />
+          <button onClick={() => void runSearch()} disabled={searchLoading}>
+            {searchLoading ? "검색 중..." : "검색"}
+          </button>
+        </div>
 
-            <div className="field-block">
-              <label className="label">
-                <span className="label-head">타겟 플랫폼</span>
-                <select className="input platform-select" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-                  <option value="spotify">Spotify</option>
-                  <option value="youtube-music">YouTube Music</option>
-                  <option value="apple-music">Apple Music</option>
-                  <option value="multi">멀티 배포</option>
-                </select>
-              </label>
-            </div>
+        {searchError && <p className="error-text">{searchError}</p>}
 
-            <div
-              className={`field-block upload-block ${isDragging ? "dragging" : ""}`}
-              tabIndex={0}
-              role="button"
-              onClick={openFilePicker}
-              onDragOver={handleUploadBlockDragOver}
-              onDragLeave={handleUploadBlockDragLeave}
-              onDrop={handleUploadBlockDrop}
-              onPaste={handleUploadBlockPaste}
-            >
-              <label className="label" htmlFor="sample-file-input">
-                <span className="label-head">샘플 파일 업로드</span>
-                <span className="label-sub">(drag & paste / wav, mp3)</span>
-                <input
-                  ref={fileInputRef}
-                  id="sample-file-input"
-                  className="input"
-                  type="file"
-                  accept=".wav,.mp3,audio/wav,audio/mpeg"
-                  onChange={(e) => handleSelectedFile(e.target.files?.[0] ?? null)}
-                  hidden
-                />
-              </label>
-
-              {!sampleFile && (
-                <div className="dropzone">
-                  <p className="drop-title">이 영역 아무 곳에나 파일을 드래그/붙여넣기</p>
-                  <p className="muted">또는 클릭해서 파일 선택</p>
+        <div className="grid cards">
+          {searchResults.map((anime) => (
+            <article className="anime-card" key={anime.id}>
+              <img
+                src={anime.coverImage?.medium || anime.coverImage?.large || ""}
+                alt={getTitle(anime)}
+              />
+              <div>
+                <h3>{getTitle(anime)}</h3>
+                <p>{cleanDescription(anime.description)}</p>
+                <div className="meta-row">
+                  <span>Score {anime.meanScore ?? "-"}</span>
+                  <span>{anime.seasonYear ?? "-"}</span>
                 </div>
-              )}
-
-              {sampleFile && (
-                <div className="file-tile">
-                  <div className="file-visual" aria-hidden>
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <div className="file-meta">
-                    <p className="file-name">{sampleFile.name}</p>
-                    <p className="file-detail">
-                      {(sampleFile.size / (1024 * 1024)).toFixed(2)} MB · {sampleFile.type || "audio"}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {errorMessage && <p className="error-text">{errorMessage}</p>}
-
-            {isAnalyzing && (
-              <div className="analysis-box">
-                <p className="analysis-title">분석 진행 중</p>
-                <p className="analysis-stage">{analysisStage}</p>
+                <button
+                  className="add-btn"
+                  onClick={() => addSeed(anime)}
+                  disabled={selectedSeedIds.has(anime.id) || selectedSeeds.length >= 10}
+                >
+                  {selectedSeedIds.has(anime.id) ? "선택됨" : "시드에 추가"}
+                </button>
               </div>
-            )}
+            </article>
+          ))}
+        </div>
+      </section>
 
-            <button className="btn" type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
-              {isAnalyzing ? "분석 중..." : "리스크 분석하기"}
-            </button>
+      <section className="panel seed-panel">
+        <h2>2) 선택한 시드 (3~10개)</h2>
+        <div className="seed-list">
+          {selectedSeeds.map((item) => (
+            <div className="seed-item" key={item.anime.id}>
+              <span>{getTitle(item.anime)}</span>
+              <div className="seed-actions">
+                <select
+                  value={item.preference}
+                  onChange={(e) => updatePreference(item.anime.id, e.target.value as Preference)}
+                >
+                  <option value="love">좋아함</option>
+                  <option value="neutral">보통</option>
+                  <option value="dislike">별로</option>
+                </select>
+                <button className="remove-btn" onClick={() => removeSeed(item.anime.id)}>
+                  제거
+                </button>
+              </div>
+            </div>
+          ))}
+          {!selectedSeeds.length && <p className="hint">먼저 검색에서 애니를 추가해 주세요.</p>}
+        </div>
 
-            <p className="notice-text">
-              현재 버전은 파일을 브라우저 내에서만 임시 처리하며 서버에 저장하지 않습니다.
-            </p>
-          </section>
+        <button className="recommend-btn" onClick={() => void recommend()} disabled={recommendLoading}>
+          {recommendLoading ? "추천 생성 중..." : "3개 레일 추천 받기"}
+        </button>
+        {recommendError && <p className="error-text">{recommendError}</p>}
+      </section>
 
-          <section className="card info-card">
-            <h2>이 서비스는 어떻게 작동하나요?</h2>
-            <ul className="list">
-              <li>오디오 기본 신호(길이, 포맷, 파일 특성) 분석</li>
-              <li>반복 루프 강도 및 유사 패턴 위험도 산출</li>
-              <li>플랫폼 정책 기준 기반 리스크 스코어링</li>
-              <li>배포 전 확인이 필요한 항목을 단계별로 안내</li>
-            </ul>
-          </section>
-        </main>
+      {rails && (
+        <section className="panel result-panel motion-in">
+          <h2>3) 추천 결과</h2>
+
+          <div className="rail">
+            <div className="rail-head">
+              <h3>취향 직격</h3>
+              <p>시드 태그/장르 유사도가 가장 높은 라인</p>
+            </div>
+            <div className="grid cards">
+              {rails.directHits.map((item) => (
+                <RecommendationCard key={item.anime.id} item={item} />
+              ))}
+            </div>
+          </div>
+
+          <div className="rail">
+            <div className="rail-head">
+              <h3>숨은 명작</h3>
+              <p>대중 노출은 낮지만 점수/완성도 신호가 높은 라인</p>
+            </div>
+            <div className="grid cards">
+              {rails.hiddenGems.map((item) => (
+                <RecommendationCard key={item.anime.id} item={item} />
+              ))}
+            </div>
+          </div>
+
+          <div className="rail">
+            <div className="rail-head">
+              <h3>새로움 추천</h3>
+              <p>취향은 맞지만 기존 시드와 다른 결을 섞은 라인</p>
+            </div>
+            <div className="grid cards">
+              {rails.freshPicks.map((item) => (
+                <RecommendationCard key={item.anime.id} item={item} />
+              ))}
+            </div>
+          </div>
+        </section>
       )}
 
-      {viewMode === "result" && result && (
-        <main className="stack">
-          <section className="card result-card motion-in">
-            <h2>리스크 결과</h2>
-            <p className={`badge badge-${result.level.toLowerCase()}`}>{result.level}</p>
-            <p className="score">Risk Score: {result.score}/100</p>
-
-            <div className="meta-grid result-section rs1">
-              <p><strong>파일:</strong> {result.fileName}</p>
-              <p><strong>형식:</strong> {result.fileType}</p>
-              <p><strong>용량:</strong> {result.fileSizeMb} MB</p>
-              <p><strong>재생 길이:</strong> {result.durationSec} sec</p>
-              <p><strong>플랫폼:</strong> {result.platform}</p>
-            </div>
-
-            <div className="result-section rs2">
-              <p className="label-title">판정 근거</p>
-              <ul className="list">
-                {result.reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="result-section rs3">
-              <p className="label-title">권장 액션</p>
-              <p>{result.action}</p>
-            </div>
-
-            <div className="result-section rs4">
-              <p className="label-title">Risk Breakdown</p>
-              <ul className="list">
-                <li>유사도 리스크: {result.breakdown.similarityRisk}/100</li>
-                <li>AI 생성 의심 신호: {result.breakdown.aiSignalRisk}/100</li>
-                <li>반복 루프 강도: {result.breakdown.loopIntensityRisk}/100</li>
-                <li>보컬 존재 가능성: {result.breakdown.vocalPresence}</li>
-              </ul>
-            </div>
-
-            <p className="notice-text">
-              본 리스크 평가는 자동화된 신호 기반 분석 결과이며, Spotify, YouTube Music 등 플랫폼의
-              최종 판정을 보장하지 않습니다. 상업적 배포 전에는 반드시 라이선스 및 저작권 상태를
-              직접 확인하시기 바랍니다.
-            </p>
-
-            <p className="notice-text">
-              업로드된 파일은 분석 후 자동 삭제 대상이며, 서버 분석 도입 시 24시간 내 삭제 정책으로
-              운영됩니다.
-            </p>
-
-            <button className="btn secondary" type="button" onClick={resetToInput}>
-              다른 파일 다시 분석
-            </button>
-          </section>
-        </main>
-      )}
-
-      <footer className="foot muted">
-        <p>Google Analytics / Microsoft Clarity / AdSense 적용 유지</p>
+      <footer className="footer-note">
+        <p>
+          데이터 출처: AniList GraphQL API (무료). 추천 결과는 참고용이며, 개인 취향에 따라 달라질 수
+          있습니다.
+        </p>
       </footer>
     </div>
+  );
+}
+
+function RecommendationCard({ item }: { item: RecommendationItem }) {
+  return (
+    <article className="anime-card rec-card">
+      <img src={item.anime.coverImage?.medium || item.anime.coverImage?.large || ""} alt={getTitle(item.anime)} />
+      <div>
+        <h3>{getTitle(item.anime)}</h3>
+        <p>{cleanDescription(item.anime.description)}</p>
+        <div className="meta-row">
+          <span>추천점수 {Math.round(item.score)}</span>
+          <span>평점 {item.anime.meanScore ?? "-"}</span>
+        </div>
+        <p className="why">{item.why}</p>
+        <div className="chip-row">
+          {item.matchedGenres.slice(0, 2).map((genre) => (
+            <span key={genre} className="chip">#{genre}</span>
+          ))}
+          {item.matchedTags.slice(0, 2).map((tag) => (
+            <span key={tag} className="chip dim">#{tag}</span>
+          ))}
+        </div>
+      </div>
+    </article>
   );
 }
