@@ -14,23 +14,13 @@ body {
 
 .page {
   min-height: 100vh;
-  padding: 28px;
+  padding: 28px 16px 40px;
 }
 
 .hero {
-  margin-bottom: 20px;
-}
-
-.layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
+  max-width: 720px;
+  margin: 0 auto 18px;
+  text-align: center;
 }
 
 .card {
@@ -42,30 +32,41 @@ body {
 }
 
 .kicker {
-  margin: 0 0 10px;
-  font-size: 0.8rem;
+  margin: 0 0 8px;
+  font-size: 0.76rem;
   letter-spacing: 0.08em;
   font-weight: 700;
 }
 
 h1 {
-  margin: 0 0 10px;
-  font-size: clamp(1.8rem, 3vw, 2.8rem);
+  margin: 0 0 8px;
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
 }
 
 h2 {
   margin: 0 0 14px;
-  font-size: 1.3rem;
+  font-size: 1.25rem;
 }
 
 .muted {
   color: #456062;
 }
 
+.stack {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.form-card,
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .label {
   display: grid;
   gap: 8px;
-  margin-bottom: 12px;
   font-weight: 600;
 }
 
@@ -74,18 +75,32 @@ h2 {
   border-radius: 12px;
   padding: 10px;
   font: inherit;
+  background: #fff;
 }
 
-.checks {
-  display: grid;
-  gap: 10px;
-  margin-top: 10px;
+.btn {
+  border: 2px solid #132021;
+  border-radius: 12px;
+  background: #53d7b1;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.check {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.btn.secondary {
+  background: #f4f4f4;
+}
+
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.error-text {
+  margin: 0;
+  color: #a0002f;
+  font-weight: 600;
 }
 
 .badge {
@@ -93,7 +108,7 @@ h2 {
   border: 2px solid #132021;
   border-radius: 999px;
   padding: 6px 10px;
-  margin: 0 0 8px;
+  margin: 0;
   font-weight: 700;
 }
 
@@ -110,14 +125,26 @@ h2 {
 }
 
 .score {
-  font-size: 1.2rem;
+  margin: 0;
+  font-size: 1.15rem;
   font-weight: 700;
-  margin: 4px 0;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+@media (max-width: 640px) {
+  .meta-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .label-title {
+  margin: 0 0 6px;
   font-weight: 700;
-  margin-bottom: 6px;
 }
 
 .list {
@@ -126,9 +153,8 @@ h2 {
 }
 
 .foot {
-  margin-top: 18px;
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-  font-size: 0.9rem;
+  max-width: 720px;
+  margin: 16px auto 0;
+  text-align: center;
+  font-size: 0.88rem;
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type CheckLevel = "PASS" | "CAUTION" | "BLOCK";
 
@@ -7,45 +7,85 @@ type CheckResult = {
   score: number;
   reasons: string[];
   action: string;
+  fileName: string;
+  fileType: string;
+  fileSizeMb: string;
+  durationSec: string;
+  platform: string;
 };
 
-function evaluateSample(
-  hasLicenseDoc: boolean,
-  isAIGenerated: boolean,
-  containsThirdPartyLoop: boolean,
-  sourceUnknown: boolean,
-): CheckResult {
-  let score = 15;
+type ViewMode = "input" | "result";
+
+function getAudioDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const audio = document.createElement("audio");
+    const url = URL.createObjectURL(file);
+
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      URL.revokeObjectURL(url);
+      resolve(duration);
+    };
+
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(0);
+    };
+
+    audio.src = url;
+  });
+}
+
+function evaluateSample(file: File, duration: number, platform: string): CheckResult {
+  let score = 10;
   const reasons: string[] = [];
 
-  if (!hasLicenseDoc) {
-    score += 30;
-    reasons.push("샘플 클리어/라이선스 증빙이 없습니다.");
-  }
+  const extension = file.name.toLowerCase().split(".").pop() ?? "";
+  const fileSizeMb = file.size / (1024 * 1024);
 
-  if (isAIGenerated) {
+  if (!["wav", "mp3"].includes(extension)) {
     score += 25;
-    reasons.push("AI 생성 샘플로 표시되어 플랫폼 정책 이슈 가능성이 있습니다.");
+    reasons.push("지원 권장 포맷(wav/mp3) 외 파일입니다.");
   }
 
-  if (containsThirdPartyLoop) {
-    score += 20;
-    reasons.push("서드파티 루프/샘플 포함 가능성이 있습니다.");
+  if (duration > 0 && duration < 2.5) {
+    score += 18;
+    reasons.push("길이가 매우 짧아 루프/원샷 샘플일 가능성이 있습니다.");
   }
 
-  if (sourceUnknown) {
-    score += 20;
-    reasons.push("원본 출처를 증명할 수 없습니다.");
+  if (fileSizeMb < 0.08) {
+    score += 16;
+    reasons.push("파일 용량이 매우 작아 재사용 샘플 가능성이 있습니다.");
+  }
+
+  if (file.type === "" || file.type === "application/octet-stream") {
+    score += 14;
+    reasons.push("MIME 정보가 불명확해 출처/인코딩 검증이 필요합니다.");
+  }
+
+  if (platform === "multi") {
+    score += 8;
+    reasons.push("멀티 배포는 플랫폼별 정책 차이로 심사가 더 보수적일 수 있습니다.");
   }
 
   score = Math.min(100, score);
+
+  if (!reasons.length) {
+    reasons.push("기본 파일 신호 기준으로 즉시 차단 위험은 낮아 보입니다.");
+  }
 
   if (score >= 70) {
     return {
       level: "BLOCK",
       score,
       reasons,
-      action: "배포 중지 후 샘플 출처/라이선스 문서를 먼저 확보하세요.",
+      action: "배포를 멈추고 샘플 라이선스/출처 문서를 먼저 확보하세요.",
+      fileName: file.name,
+      fileType: file.type || "unknown",
+      fileSizeMb: fileSizeMb.toFixed(2),
+      durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
+      platform,
     };
   }
 
@@ -54,98 +94,142 @@ function evaluateSample(
       level: "CAUTION",
       score,
       reasons,
-      action: "배포 전 권리 확인 문서와 프로젝트별 사용 허용 범위를 검토하세요.",
+      action: "배포 전 클리어런스 증빙 문서와 샘플 출처를 추가 확인하세요.",
+      fileName: file.name,
+      fileType: file.type || "unknown",
+      fileSizeMb: fileSizeMb.toFixed(2),
+      durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
+      platform,
     };
   }
 
   return {
     level: "PASS",
     score,
-    reasons: reasons.length ? reasons : ["현재 입력 기준으로 주요 리스크 신호가 낮습니다."],
-    action: "배포 전 최종 메타데이터/크레딧 표기만 확인하세요.",
+    reasons,
+    action: "현재 신호 기준 리스크는 낮지만, 상업 배포 전 권리 검토는 유지하세요.",
+    fileName: file.name,
+    fileType: file.type || "unknown",
+    fileSizeMb: fileSizeMb.toFixed(2),
+    durationSec: duration > 0 ? duration.toFixed(2) : "unknown",
+    platform,
   };
 }
 
 export default function App() {
-  const [sampleName, setSampleName] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("input");
   const [platform, setPlatform] = useState("spotify");
-  const [hasLicenseDoc, setHasLicenseDoc] = useState(false);
-  const [isAIGenerated, setIsAIGenerated] = useState(false);
-  const [containsThirdPartyLoop, setContainsThirdPartyLoop] = useState(false);
-  const [sourceUnknown, setSourceUnknown] = useState(false);
+  const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [result, setResult] = useState<CheckResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const result = useMemo(
-    () => evaluateSample(hasLicenseDoc, isAIGenerated, containsThirdPartyLoop, sourceUnknown),
-    [hasLicenseDoc, isAIGenerated, containsThirdPartyLoop, sourceUnknown],
-  );
+  async function handleAnalyze() {
+    if (!sampleFile) {
+      setErrorMessage("WAV 또는 MP3 파일을 먼저 업로드하세요.");
+      return;
+    }
+
+    setErrorMessage("");
+    setIsAnalyzing(true);
+
+    const duration = await getAudioDuration(sampleFile);
+    const nextResult = evaluateSample(sampleFile, duration, platform);
+
+    setResult(nextResult);
+    setViewMode("result");
+    setIsAnalyzing(false);
+  }
+
+  function resetToInput() {
+    setViewMode("input");
+    setErrorMessage("");
+  }
 
   return (
     <div className="page">
       <header className="hero card">
         <p className="kicker">VOKO SAMPLE RISK CHECKER</p>
-        <h1>샘플이 수익화/유통에서 걸릴지 사전 점검</h1>
-        <p className="muted">
-          Spotify, YouTube Music 등 업로드 전 리스크를 빠르게 확인하는 프로듀서용 웹앱입니다.
-          이 결과는 법률 확정이 아닌 사전 위험도 체크입니다.
-        </p>
+        <h1>샘플 수익화 리스크 사전 점검</h1>
+        <p className="muted">파일 업로드 후 플랫폼 배포 리스크를 빠르게 확인합니다.</p>
       </header>
 
-      <main className="layout">
-        <section className="card">
-          <h2>샘플 정보 입력</h2>
-          <label className="label">
-            샘플 이름
-            <input
-              className="input"
-              value={sampleName}
-              onChange={(e) => setSampleName(e.target.value)}
-              placeholder="예: dark_pad_loop_01.wav"
-            />
-          </label>
+      {viewMode === "input" && (
+        <main className="stack">
+          <section className="card form-card">
+            <h2>샘플 정보 입력</h2>
 
-          <label className="label">
-            타겟 플랫폼
-            <select className="input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-              <option value="spotify">Spotify</option>
-              <option value="youtube-music">YouTube Music</option>
-              <option value="apple-music">Apple Music</option>
-              <option value="multi">멀티 배포</option>
-            </select>
-          </label>
+            <label className="label">
+              타겟 플랫폼
+              <select className="input" value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                <option value="spotify">Spotify</option>
+                <option value="youtube-music">YouTube Music</option>
+                <option value="apple-music">Apple Music</option>
+                <option value="multi">멀티 배포</option>
+              </select>
+            </label>
 
-          <div className="checks">
-            <label className="check"><input type="checkbox" checked={hasLicenseDoc} onChange={(e) => setHasLicenseDoc(e.target.checked)} /> 라이선스/클리어 문서 보유</label>
-            <label className="check"><input type="checkbox" checked={isAIGenerated} onChange={(e) => setIsAIGenerated(e.target.checked)} /> AI 생성 샘플 포함</label>
-            <label className="check"><input type="checkbox" checked={containsThirdPartyLoop} onChange={(e) => setContainsThirdPartyLoop(e.target.checked)} /> 서드파티 루프/원샷 사용</label>
-            <label className="check"><input type="checkbox" checked={sourceUnknown} onChange={(e) => setSourceUnknown(e.target.checked)} /> 원본 출처 불명확</label>
-          </div>
-        </section>
+            <label className="label">
+              샘플 파일 업로드 (wav, mp3)
+              <input
+                className="input"
+                type="file"
+                accept=".wav,.mp3,audio/wav,audio/mpeg"
+                onChange={(e) => setSampleFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
 
-        <section className="card">
-          <h2>리스크 결과</h2>
-          <p className={`badge badge-${result.level.toLowerCase()}`}>{result.level}</p>
-          <p className="score">Risk Score: {result.score}/100</p>
-          <p className="muted">샘플: {sampleName || "미입력"} / 플랫폼: {platform}</p>
+            {sampleFile && (
+              <p className="muted">선택 파일: {sampleFile.name}</p>
+            )}
 
-          <div>
-            <p className="label-title">판정 근거</p>
-            <ul className="list">
-              {result.reasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </div>
+            {errorMessage && <p className="error-text">{errorMessage}</p>}
 
-          <div>
-            <p className="label-title">권장 액션</p>
-            <p>{result.action}</p>
-          </div>
-        </section>
-      </main>
+            <button className="btn" type="button" onClick={handleAnalyze} disabled={isAnalyzing}>
+              {isAnalyzing ? "분석 중..." : "리스크 분석하기"}
+            </button>
+          </section>
+        </main>
+      )}
+
+      {viewMode === "result" && result && (
+        <main className="stack">
+          <section className="card result-card">
+            <h2>리스크 결과</h2>
+            <p className={`badge badge-${result.level.toLowerCase()}`}>{result.level}</p>
+            <p className="score">Risk Score: {result.score}/100</p>
+
+            <div className="meta-grid">
+              <p><strong>파일:</strong> {result.fileName}</p>
+              <p><strong>형식:</strong> {result.fileType}</p>
+              <p><strong>용량:</strong> {result.fileSizeMb} MB</p>
+              <p><strong>재생 길이:</strong> {result.durationSec} sec</p>
+              <p><strong>플랫폼:</strong> {result.platform}</p>
+            </div>
+
+            <div>
+              <p className="label-title">판정 근거</p>
+              <ul className="list">
+                {result.reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <p className="label-title">권장 액션</p>
+              <p>{result.action}</p>
+            </div>
+
+            <button className="btn secondary" type="button" onClick={resetToInput}>
+              다른 파일 다시 분석
+            </button>
+          </section>
+        </main>
+      )}
 
       <footer className="foot muted">
-        <p>Firebase + GitHub + Cloudflare Pages 배포 구조</p>
-        <p>Google Analytics / Microsoft Clarity / AdSense 스크립트 적용</p>
+        <p>Google Analytics / Microsoft Clarity / AdSense 적용 유지</p>
       </footer>
     </div>
   );
