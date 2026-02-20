@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Anime = {
   id: number;
   idMal?: number;
+  format?: string;
   title: {
     romaji?: string;
     english?: string;
     native?: string;
   };
+  synonyms?: string[];
   description?: string;
   coverImage?: {
     large?: string;
@@ -60,7 +62,9 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
     ) {
       id
       idMal
+      format
       title { romaji english native }
+      synonyms
       description(asHtml: false)
       coverImage { medium large }
       genres
@@ -82,7 +86,9 @@ query ($id: Int) {
         mediaRecommendation {
           id
           idMal
+          format
           title { romaji english native }
+          synonyms
           description(asHtml: false)
           coverImage { medium large }
           genres
@@ -103,7 +109,9 @@ query ($genreIn: [String], $page: Int, $perPage: Int) {
     media(type: ANIME, status_not_in: [NOT_YET_RELEASED], genre_in: $genreIn, sort: POPULARITY_DESC) {
       id
       idMal
+      format
       title { romaji english native }
+      synonyms
       description(asHtml: false)
       coverImage { medium large }
       genres
@@ -150,30 +158,122 @@ const KOREAN_TITLE_BY_MAL_ID: Record<number, string> = {
   21: "원피스",
   11061: "헌터×헌터",
   44511: "장송의 프리렌",
+  42249: "도쿄 리벤저스",
+  20583: "하이큐!!",
+  47: "아키라",
+  11757: "소드 아트 온라인",
+  28851: "목소리의 형태",
+  1649: "에반게리온",
+  1575: "코드 기아스",
+  35849: "바이올렛 에버가든",
+  38408: "귀멸의 칼날 무한열차편",
 };
+
+const KO_TITLE_CACHE_KEY = "voko_ko_title_cache_v1";
 
 function normalizeTitle(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function getTitle(anime: Anime): string {
+function hasHangul(value?: string): value is string {
+  return !!value && /[가-힣]/.test(value);
+}
+
+function cacheKey(anime: Anime): string {
+  return anime.idMal ? `mal:${anime.idMal}` : `ani:${anime.id}`;
+}
+
+function titleFromStaticMap(anime: Anime): string | undefined {
   if (anime.idMal && KOREAN_TITLE_BY_MAL_ID[anime.idMal]) {
     return KOREAN_TITLE_BY_MAL_ID[anime.idMal];
   }
 
-  const english = anime.title.english?.trim();
-  const romaji = anime.title.romaji?.trim();
-  const native = anime.title.native?.trim();
-
-  const candidates = [english, romaji, native].filter((v): v is string => !!v);
+  const candidates = [anime.title.english, anime.title.romaji, anime.title.native].filter(
+    (v): v is string => !!v,
+  );
   for (const raw of candidates) {
     const key = normalizeTitle(raw);
     if (KOREAN_TITLE_BY_KEY[key]) {
       return KOREAN_TITLE_BY_KEY[key];
     }
   }
+  return undefined;
+}
 
-  // Korean cache에 없으면 Japanese(native)는 사용하지 않음.
+function titleFromSynonyms(anime: Anime): string | undefined {
+  const fromSynonym = (anime.synonyms ?? []).find((syn) => hasHangul(syn));
+  if (fromSynonym) return fromSynonym.trim();
+  if (hasHangul(anime.title.native)) return anime.title.native.trim();
+  return undefined;
+}
+
+async function fetchKoreanTitleFromWikidata(idMal: number): Promise<string | null> {
+  const query = `
+SELECT ?label WHERE {
+  ?item wdt:P4086 "${idMal}".
+  ?item rdfs:label ?label.
+  FILTER(LANG(?label) = "ko")
+}
+LIMIT 1
+`;
+  const endpoint = `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`;
+  const res = await fetch(endpoint, {
+    headers: {
+      Accept: "application/sparql-results+json",
+    },
+  });
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as {
+    results?: { bindings?: Array<{ label?: { value?: string } }> };
+  };
+  const label = json.results?.bindings?.[0]?.label?.value;
+  return label?.trim() || null;
+}
+
+function franchiseKey(anime: Anime): string {
+  const baseTitle = anime.title.english || anime.title.romaji || anime.title.native || String(anime.id);
+  return normalizeTitle(baseTitle)
+    .replace(/[:\-|].*$/g, "")
+    .replace(/\b(\d+th|\d+nd|\d+rd|\d+st)\s+season\b/g, "")
+    .replace(/\bseason\s+\d+\b/g, "")
+    .replace(/\bpart\s+\d+\b/g, "")
+    .replace(/\b(movie|special|ova|ona)\b/g, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeByFranchise(animes: Anime[]): Anime[] {
+  const map = new Map<string, Anime>();
+  for (const anime of animes) {
+    const key = franchiseKey(anime);
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, anime);
+      continue;
+    }
+    const currentScore = (current.popularity ?? 0) + (current.meanScore ?? 0) * 100;
+    const nextScore = (anime.popularity ?? 0) + (anime.meanScore ?? 0) * 100;
+    if (nextScore > currentScore) {
+      map.set(key, anime);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function getTitle(anime: Anime, koTitleCache: Record<string, string>): string {
+  const cached = koTitleCache[cacheKey(anime)];
+  if (cached) return cached;
+
+  const staticMapped = titleFromStaticMap(anime);
+  if (staticMapped) return staticMapped;
+
+  const fromSynonyms = titleFromSynonyms(anime);
+  if (fromSynonyms) return fromSynonyms;
+
+  const english = anime.title.english?.trim();
+  const romaji = anime.title.romaji?.trim();
   if (english) return english;
   if (romaji) return romaji;
   return `한글 제목 준비중 (#${anime.id})`;
@@ -278,6 +378,8 @@ export default function App() {
   const [finalRecs, setFinalRecs] = useState<Anime[]>([]);
   const [finalLoading, setFinalLoading] = useState(false);
   const [finalError, setFinalError] = useState("");
+  const [koTitleCache, setKoTitleCache] = useState<Record<string, string>>({});
+  const lookupInFlight = useRef<Set<string>>(new Set());
 
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
@@ -290,6 +392,25 @@ export default function App() {
     similarAnimes.forEach((a) => map.set(a.id, a));
     return map;
   }, [categoryAnimes, similarAnimes]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(KO_TITLE_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      setKoTitleCache(parsed);
+    } catch {
+      // ignore malformed cache
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(KO_TITLE_CACHE_KEY, JSON.stringify(koTitleCache));
+    } catch {
+      // ignore storage errors
+    }
+  }, [koTitleCache]);
 
   async function fetchCategoryAnimes(category: Category) {
     setCategoryLoading(true);
@@ -308,7 +429,10 @@ export default function App() {
         page: 1,
         perPage: 72,
       });
-      setCategoryAnimes(data.Page.media ?? []);
+      const filtered = (data.Page.media ?? []).filter(
+        (anime) => !["MOVIE", "SPECIAL", "MUSIC"].includes(anime.format ?? ""),
+      );
+      setCategoryAnimes(dedupeByFranchise(filtered));
     } catch (error) {
       setCategoryError(error instanceof Error ? error.message : "카테고리 로딩 실패");
     } finally {
@@ -354,7 +478,7 @@ export default function App() {
       }
 
       const step2IdSet = new Set(categoryAnimes.map((anime) => anime.id));
-      const unique = Array.from(new Map(all.map((a) => [a.id, a])).values()).filter(
+      const unique = dedupeByFranchise(Array.from(new Map(all.map((a) => [a.id, a])).values())).filter(
         (anime) => !pickedBaseIds.includes(anime.id) && !step2IdSet.has(anime.id),
       );
 
@@ -395,7 +519,7 @@ export default function App() {
       });
 
       const seedSet = new Set(allSeedIds);
-      const ranked = (data.Page.media ?? [])
+      const ranked = dedupeByFranchise(data.Page.media ?? [])
         .filter((anime) => !seedSet.has(anime.id))
         .map((anime) => ({ anime, score: scoreCandidate(anime, seeds) }))
         .sort((a, b) => b.score - a.score)
@@ -417,6 +541,50 @@ export default function App() {
   }, [categoryAnimes, step2Tab]);
 
   const step2TabCount = Math.max(1, Math.ceil(categoryAnimes.length / 18));
+
+  const visibleAnimesForKoLookup = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          [...visibleStep2Animes, ...similarAnimes, ...finalRecs].map((anime) => [anime.id, anime]),
+        ).values(),
+      ),
+    [visibleStep2Animes, similarAnimes, finalRecs],
+  );
+
+  useEffect(() => {
+    async function resolveKoreanTitles() {
+      for (const anime of visibleAnimesForKoLookup) {
+        const key = cacheKey(anime);
+        if (koTitleCache[key] || lookupInFlight.current.has(key)) continue;
+
+        const staticMapped = titleFromStaticMap(anime);
+        if (staticMapped) {
+          setKoTitleCache((prev) => (prev[key] ? prev : { ...prev, [key]: staticMapped }));
+          continue;
+        }
+
+        const synonymMapped = titleFromSynonyms(anime);
+        if (synonymMapped) {
+          setKoTitleCache((prev) => (prev[key] ? prev : { ...prev, [key]: synonymMapped }));
+          continue;
+        }
+
+        if (!anime.idMal) continue;
+        lookupInFlight.current.add(key);
+        try {
+          const wikidataKo = await fetchKoreanTitleFromWikidata(anime.idMal);
+          if (wikidataKo) {
+            setKoTitleCache((prev) => (prev[key] ? prev : { ...prev, [key]: wikidataKo }));
+          }
+        } finally {
+          lookupInFlight.current.delete(key);
+        }
+      }
+    }
+
+    void resolveKoreanTitles();
+  }, [visibleAnimesForKoLookup, koTitleCache]);
 
   return (
     <div className={`page ${!categoryAnimes.length && !similarAnimes.length && !finalRecs.length ? "landing" : ""}`}>
@@ -474,9 +642,9 @@ export default function App() {
                 className={`anime-card ${pickedBaseIds.includes(anime.id) ? "selected" : ""}`}
                 onClick={() => toggleBasePick(anime.id)}
               >
-                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime, koTitleCache)} />
                 <div>
-                  <h4>{getTitle(anime)}</h4>
+                  <h4>{getTitle(anime, koTitleCache)}</h4>
                   <p>{buildKoreanSummary(anime)}</p>
                   <div className="meta-row">
                     <span>★ {anime.meanScore ?? "-"}</span>
@@ -503,9 +671,9 @@ export default function App() {
                 className={`anime-card compact ${pickedSimilarIds.includes(anime.id) ? "selected" : ""}`}
                 onClick={() => toggleSimilarPick(anime.id)}
               >
-                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime, koTitleCache)} />
                 <div>
-                  <h4>{getTitle(anime)}</h4>
+                  <h4>{getTitle(anime, koTitleCache)}</h4>
                   <p>{buildKoreanSummary(anime)}</p>
                 </div>
               </article>
@@ -525,9 +693,9 @@ export default function App() {
           <div className="grid cards">
             {finalRecs.map((anime) => (
               <article key={anime.id} className="anime-card result">
-                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime)} />
+                <img src={anime.coverImage?.medium || anime.coverImage?.large || ""} alt={getTitle(anime, koTitleCache)} />
                 <div>
-                  <h4>{getTitle(anime)}</h4>
+                  <h4>{getTitle(anime, koTitleCache)}</h4>
                   <p>{buildKoreanSummary(anime)}</p>
                   <div className="meta-row">
                     <span>평점 {anime.meanScore ?? "-"}</span>
