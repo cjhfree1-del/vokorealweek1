@@ -1,4 +1,5 @@
-import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import CategoryStrip from "./components/CategoryStrip";
 import { buildKoFallbackIndexes, normalizeKoFallbackKey } from "./data/koTitleFallbackRepo";
 import { localizeAnimeFromApi } from "./api/localizeAnimeClient";
 import { ANILIST_ENDPOINT, DISCOVERY_MEDIA_QUERY, RECOMMENDATION_QUERY } from "./reco/anilistQueries";
@@ -621,6 +622,10 @@ export default function App() {
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
     [selectedCategoryId],
+  );
+  const categoryStripItems = useMemo(
+    () => CATEGORIES.map((category) => ({ id: category.id, label: category.label, imageUrl: category.previewImage })),
+    [],
   );
 
   useEffect(() => {
@@ -1300,6 +1305,14 @@ export default function App() {
     }
   }
 
+  function handleCategoryPick(categoryId: string): void {
+    const category = CATEGORIES.find((row) => row.id === categoryId);
+    if (!category) return;
+    setSelectedCategoryId(category.id);
+    setActiveStep(2);
+    void fetchCategoryAnimes(category, "reset");
+  }
+
   const visibleAnimesForKoLookup = useMemo(
     () =>
       Array.from(
@@ -1395,30 +1408,7 @@ export default function App() {
       {activeStep === 1 && (
       <section className="flow-panel step1-panel">
         <h2>카테고리 선택</h2>
-        <div className="chip-group">
-          {CATEGORIES.map((category) => {
-            const preview = category.previewImage;
-            return (
-              <button
-                key={category.id}
-                className={`chip-btn ${selectedCategoryId === category.id ? "active" : ""}`}
-                style={
-                  {
-                    "--chip-image": `url(${preview})`,
-                    "--chip-focus": category.previewFocus ?? "50% 24%",
-                  } as CSSProperties
-                }
-                onClick={() => {
-                  setSelectedCategoryId(category.id);
-                  setActiveStep(2);
-                  void fetchCategoryAnimes(category, "reset");
-                }}
-              >
-                <span className="chip-label">{category.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <CategoryStrip items={categoryStripItems} onPick={handleCategoryPick} />
         {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
       </section>

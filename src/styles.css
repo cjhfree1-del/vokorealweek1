@@ -41,11 +41,11 @@ body {
 
 .hero {
   text-align: center;
-  margin-bottom: 46px;
+  margin-bottom: 34px;
 }
 
 .page.landing .hero {
-  margin-top: -30px;
+  margin-top: -44px;
 }
 
 .kicker {
@@ -109,92 +109,98 @@ h1 {
 }
 
 .step1-panel {
-  max-width: 1100px;
-  margin: 14px auto 24px;
+  max-width: 1140px;
+  margin: 18px auto 24px;
 }
 
 .step1-panel h2 {
-  margin: 0 0 22px;
-  font-size: clamp(1.58rem, 2.6vw, 2.02rem);
+  margin: 0 0 16px;
+  font-size: clamp(1.52rem, 2.3vw, 1.9rem);
   font-family: "Jua", "Noto Sans KR", sans-serif;
   font-weight: 400;
   letter-spacing: 0.01em;
-  color: #0f3f59;
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 20px;
-  border-radius: 999px;
-  border: 2px solid #325971;
-  background: linear-gradient(180deg, #f6fbff 0%, #dff2ff 100%);
-  box-shadow: 0 6px 0 rgba(50, 89, 113, 0.2);
+  color: #113d56;
 }
 
-.chip-group {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 18px;
-  justify-content: center;
+.category-strip {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  display: flex;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  background: #132434;
 }
 
-.chip-btn {
-  border: 2px solid #304b62;
-  background: #1c3242;
-  color: #ffffff;
-  border-radius: 18px;
-  min-height: 178px;
-  padding: 16px;
-  font: inherit;
-  font-size: 1.16rem;
-  font-weight: 800;
+.category-strip__piece {
+  flex: 1 1 0;
+  min-width: 164px;
+  border: 0;
+  padding: 0 10px 16px;
+  margin: 0;
   cursor: pointer;
+  position: relative;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   display: flex;
   align-items: flex-end;
-  text-align: left;
+  justify-content: center;
+  transition: transform 0.3s ease, filter 0.3s ease;
+  filter: brightness(0.98);
+  transform-origin: center;
+}
+
+.category-strip__piece::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.category-strip__piece:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.95);
+  outline-offset: -3px;
+  z-index: 6;
+}
+
+.category-strip__piece--left {
+  clip-path: polygon(0% 0%, 100% 0%, 92% 100%, 0% 100%);
+}
+
+.category-strip__piece--middle {
+  clip-path: polygon(8% 0%, 100% 0%, 92% 100%, 0% 100%);
+}
+
+.category-strip__piece--right {
+  clip-path: polygon(8% 0%, 100% 0%, 100% 100%, 0% 100%);
+}
+
+.category-strip:hover .category-strip__piece {
+  filter: brightness(0.8);
+}
+
+.category-strip:hover .category-strip__piece:hover,
+.category-strip:hover .category-strip__piece:focus-visible {
+  transform: scale(1.05);
+  filter: brightness(1.1);
+  z-index: 5;
+}
+
+.category-strip__piece-label {
   position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.chip-btn::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: var(--chip-image);
-  background-size: cover;
-  background-position: var(--chip-focus, 50% 24%);
-  transform: scale(1.02);
-  transition: transform 0.25s ease;
-  z-index: -2;
-}
-
-.chip-btn::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(12, 28, 39, 0.14) 0%, rgba(12, 28, 39, 0.58) 68%, rgba(12, 28, 39, 0.86) 100%);
-  z-index: -1;
-}
-
-.chip-btn:hover {
-  transform: translateY(-2px);
-  border-color: #ff6f91;
-  box-shadow: 0 12px 24px rgba(255, 111, 145, 0.16);
-}
-
-.chip-btn:hover::before {
-  transform: scale(1.06);
-}
-
-.chip-btn.active {
-  border-color: #ff6f91;
-  box-shadow: 0 0 0 3px rgba(255, 111, 145, 0.2);
-}
-
-.chip-label {
-  display: block;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  z-index: 2;
+  font-family: "Jua", "Noto Sans KR", sans-serif;
+  font-size: clamp(0.92rem, 1.6vw, 1.24rem);
+  font-weight: 800;
+  color: #ffffff;
+  text-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(13, 29, 40, 0.38);
+  backdrop-filter: blur(4px);
 }
 
 .primary-btn {
@@ -506,8 +512,12 @@ h1 {
 }
 
 @media (max-width: 1080px) {
-  .chip-group {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .category-strip {
+    height: 200px;
+  }
+
+  .category-strip__piece {
+    min-width: 150px;
   }
 
   .grid.cards {
@@ -536,7 +546,22 @@ h1 {
 
   .page.landing .hero {
     margin-top: 0;
-    margin-bottom: 30px;
+    margin-bottom: 24px;
+  }
+
+  .step1-panel {
+    margin-top: 10px;
+  }
+
+  .category-strip {
+    height: 160px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .category-strip__piece {
+    min-width: 136px;
+    padding-bottom: 10px;
   }
 
   .grid.cards,
@@ -562,14 +587,9 @@ h1 {
     margin-left: 0;
   }
 
-  .chip-btn {
-    min-height: 162px;
-    padding: 12px;
-    font-size: 1rem;
-  }
-
-  .chip-group {
-    grid-template-columns: 1fr;
+  .category-strip__piece-label {
+    padding: 4px 10px;
+    font-size: 0.86rem;
   }
 
   .anime-card {
