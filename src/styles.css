@@ -8,6 +8,7 @@
   --pink: #ff6f91;
   --cyan: #32c6d8;
   --mint: #6ad8b5;
+  --ui-scale: 1.35;
 }
 
 * {
@@ -25,8 +26,10 @@ body {
 }
 
 .page {
-  max-width: 1240px;
+  width: calc(100% / var(--ui-scale));
+  max-width: calc(1240px / var(--ui-scale));
   margin: 0 auto;
+  zoom: var(--ui-scale);
   padding: 42px 18px 58px;
 }
 
