@@ -39,16 +39,16 @@ body {
   flex-direction: column;
   justify-content: center;
   padding-top: 0;
-  padding-bottom: 34px;
+  padding-bottom: 52px;
 }
 
 .hero {
   text-align: center;
-  margin-bottom: 34px;
+  margin-bottom: 28px;
 }
 
 .page.landing .hero {
-  margin-top: -44px;
+  margin-top: -60px;
 }
 
 .kicker {
@@ -73,7 +73,7 @@ body {
 }
 
 h1 {
-  margin: 20px 0 0;
+  margin: 12px 0 0;
   font-size: clamp(2.2rem, 3.6vw, 3.2rem);
   line-height: 1.14;
   font-family: "Jua", "Noto Sans KR", sans-serif;
@@ -113,16 +113,7 @@ h1 {
 
 .step1-panel {
   max-width: 1140px;
-  margin: 18px auto 24px;
-}
-
-.step1-panel h2 {
-  margin: 0 0 16px;
-  font-size: clamp(1.52rem, 2.3vw, 1.9rem);
-  font-family: "Jua", "Noto Sans KR", sans-serif;
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  color: #113d56;
+  margin: 8px auto 24px;
 }
 
 .category-strip {
@@ -551,17 +542,17 @@ h1 {
 
   .page.landing {
     justify-content: flex-start;
-    padding-top: 34px;
+    padding-top: 24px;
     padding-bottom: 40px;
   }
 
   .page.landing .hero {
     margin-top: 0;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
 
   .step1-panel {
-    margin-top: 10px;
+    margin-top: 4px;
   }
 
   .category-strip {

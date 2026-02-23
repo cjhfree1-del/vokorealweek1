@@ -1407,7 +1407,6 @@ export default function App() {
 
       {activeStep === 1 && (
       <section className="flow-panel step1-panel">
-        <h2>카테고리 선택</h2>
         <CategoryStrip items={categoryStripItems} onPick={handleCategoryPick} />
         {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
