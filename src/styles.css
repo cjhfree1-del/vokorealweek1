@@ -38,9 +38,9 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  padding-top: 0;
-  padding-bottom: 52px;
+  justify-content: flex-start;
+  padding-top: 4px;
+  padding-bottom: 46px;
 }
 
 .hero {
@@ -48,17 +48,17 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 28px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .page.landing .hero {
-  margin-top: -88px;
+  margin-top: 0;
 }
 
 .kicker {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.55rem;
   letter-spacing: 0.14em;
   font-weight: 800;
   color: #b14579;
@@ -68,7 +68,7 @@ body {
   border: 2px solid #ffc0d8;
   background: rgba(255, 255, 255, 0.82);
   cursor: pointer;
-  padding: 8px 18px;
+  padding: 10px 22px;
   text-transform: uppercase;
   font-family: "Jua", "Noto Sans KR", sans-serif;
   border-radius: 999px;
@@ -83,19 +83,19 @@ body {
 }
 
 h1 {
-  margin: 0;
+  margin: 2px 0 0;
   font-size: clamp(2.2rem, 3.6vw, 3.2rem);
   line-height: 1.14;
   font-family: "Jua", "Noto Sans KR", sans-serif;
   letter-spacing: 0.01em;
-  color: #12445f;
+  color: #184a65;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.76);
-  background: rgba(255, 255, 255, 0.78);
-  border: 2px solid #c4def4;
-  border-radius: 22px;
-  padding: 10px 18px;
-  box-shadow: 0 10px 26px rgba(85, 117, 148, 0.18);
-  max-width: min(980px, 95%);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  max-width: min(940px, 95%);
 }
 
 .hero p {
@@ -129,7 +129,7 @@ h1 {
 
 .step1-panel {
   max-width: 1140px;
-  margin: 14px auto 24px;
+  margin: 10px auto 24px;
 }
 
 .category-strip {
@@ -558,17 +558,17 @@ h1 {
 
   .page.landing {
     justify-content: flex-start;
-    padding-top: 24px;
+    padding-top: 8px;
     padding-bottom: 40px;
   }
 
   .page.landing .hero {
-    margin-top: -8px;
-    margin-bottom: 20px;
+    margin-top: 0;
+    margin-bottom: 16px;
   }
 
   .step1-panel {
-    margin-top: 4px;
+    margin-top: 2px;
   }
 
   .category-strip {
