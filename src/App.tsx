@@ -754,19 +754,115 @@ function collectCategoryBuckets(payload: CategoryBucketPayload): Anime[] {
   return dedupeByFranchise(merged);
 }
 
+const ACTION_THEME_TAG_REGEX =
+  /(battle|fight|war|military|martial|super power|mecha|assassin|weapon|revenge|survival|monster)/i;
+const ROMANCE_THEME_TAG_REGEX =
+  /(romance|love|relationship|dating|kiss|marriage|newlyweds|romantic|romcom|shoujo|josei|love triangle)/i;
+const HEALING_THEME_TAG_REGEX =
+  /(iyashikei|healing|wholesome|daily life|slow life|friendship|family life|cute girls doing cute things|food|cooking|gourmet|slice of life)/i;
+const PSYCHOLOGICAL_THEME_TAG_REGEX =
+  /(mind game|psychological|manipulation|suspense|mystery|detective|crime|strategy|trauma|existential|philosophy|thriller|gambling)/i;
+const INTENSE_THEME_TAG_REGEX = /(gore|slasher|death game|revenge|assassin|war|military|battle royale|survival)/i;
+
+function getAnimeGenresLower(anime: Anime): Set<string> {
+  return new Set((anime.genres ?? []).map((genre) => genre.toLowerCase()));
+}
+
+function getAnimeTagsLower(anime: Anime): string[] {
+  return (anime.tags ?? []).map((tag) => (tag.name ?? "").toLowerCase()).filter(Boolean);
+}
+
+function hasGenre(genres: Set<string>, target: string): boolean {
+  return genres.has(target.toLowerCase());
+}
+
+function hasTag(tags: string[], regex: RegExp): boolean {
+  return tags.some((tag) => regex.test(tag));
+}
+
+function isCategoryAligned(categoryId: string, anime: Anime): boolean {
+  const genres = getAnimeGenresLower(anime);
+  const tags = getAnimeTagsLower(anime);
+
+  switch (categoryId) {
+    case "action": {
+      return hasGenre(genres, "Action") || hasGenre(genres, "Adventure") || hasTag(tags, ACTION_THEME_TAG_REGEX);
+    }
+    case "romance": {
+      const romanceCore = hasGenre(genres, "Romance") || hasTag(tags, ROMANCE_THEME_TAG_REGEX);
+      if (!romanceCore) return false;
+
+      const actionHeavy =
+        hasGenre(genres, "Action") ||
+        hasGenre(genres, "Adventure") ||
+        hasGenre(genres, "Mecha") ||
+        hasTag(tags, ACTION_THEME_TAG_REGEX);
+      const romanceStrength =
+        Number(hasGenre(genres, "Romance")) * 2 +
+        Number(hasTag(tags, ROMANCE_THEME_TAG_REGEX)) * 2 +
+        Number(hasGenre(genres, "Comedy")) +
+        Number(hasGenre(genres, "Drama"));
+
+      if (actionHeavy && romanceStrength < 4) return false;
+      return true;
+    }
+    case "healing": {
+      const healingCore = hasGenre(genres, "Slice of Life") || hasTag(tags, HEALING_THEME_TAG_REGEX);
+      if (!healingCore) return false;
+
+      const intenseTheme =
+        hasGenre(genres, "Action") ||
+        hasGenre(genres, "Adventure") ||
+        hasGenre(genres, "Horror") ||
+        hasGenre(genres, "Thriller") ||
+        hasTag(tags, ACTION_THEME_TAG_REGEX) ||
+        hasTag(tags, INTENSE_THEME_TAG_REGEX);
+      const strongHealingSignal =
+        hasGenre(genres, "Slice of Life") || hasTag(tags, /(iyashikei|healing|wholesome|slow life)/i);
+
+      if (intenseTheme && !strongHealingSignal) return false;
+      return true;
+    }
+    case "psychological": {
+      const psychologicalCore =
+        hasGenre(genres, "Psychological") ||
+        hasGenre(genres, "Mystery") ||
+        hasGenre(genres, "Thriller") ||
+        hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
+      if (!psychologicalCore) return false;
+
+      const pureActionFantasy =
+        (hasGenre(genres, "Action") || hasGenre(genres, "Adventure") || hasGenre(genres, "Fantasy")) &&
+        !hasGenre(genres, "Psychological") &&
+        !hasGenre(genres, "Mystery") &&
+        !hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
+
+      if (pureActionFantasy) return false;
+      return true;
+    }
+    case "special": {
+      return isSpecialThemeAnime(anime);
+    }
+    default:
+      return true;
+  }
+}
+
+function filterByCategory(categoryId: string, animes: Anime[]): Anime[] {
+  return animes.filter((anime) => isCategoryAligned(categoryId, anime));
+}
+
 function isSpecialThemeAnime(anime: Anime): boolean {
   const genres = new Set((anime.genres ?? []).map((g) => g.toLowerCase()));
   const tags = (anime.tags ?? []).map((t) => (t.name ?? "").toLowerCase()).filter(Boolean);
 
   const themeTagRegex =
     /(idol|music|band|singer|concert|showbiz|cooking|food|gourmet|restaurant|cafe|chef|workplace|office|job|profession|career|teacher|doctor|nurse|bartender|maid|sports|basketball|baseball|soccer|volleyball|swimming|athlete)/i;
-  const actionHeavyTagRegex =
-    /(battle|war|military|super power|martial|mecha|assassin|revenge|survival|gore|weapon|gun|monster)/i;
 
   const strongThemeTagHits = tags.filter((tag) => themeTagRegex.test(tag)).length;
   const themeGenreHit = genres.has("music") || genres.has("sports");
   const actionGenreHits = Number(genres.has("action")) + Number(genres.has("adventure")) + Number(genres.has("fantasy"));
-  const actionTagHits = tags.filter((tag) => actionHeavyTagRegex.test(tag)).length;
+  const actionTagHits = tags.filter((tag) => ACTION_THEME_TAG_REGEX.test(tag)).length;
 
   const themeStrength = strongThemeTagHits * 2 + (themeGenreHit ? 2 : 0);
   const actionStrength = actionGenreHits + actionTagHits * 1.6;
@@ -1198,9 +1294,7 @@ export default function App() {
         minScore: strictMinScore,
         minPopularity: strictMinPopularity,
       });
-      const strictCandidates = isSpecialCategory
-        ? collectCategoryBuckets(strictPayload).filter(isSpecialThemeAnime)
-        : collectCategoryBuckets(strictPayload);
+      const strictCandidates = filterByCategory(category.id, collectCategoryBuckets(strictPayload));
 
       let nextList = distributeBySubcategory(
         category.id,
@@ -1216,9 +1310,7 @@ export default function App() {
           minScore: 0,
           minPopularity: 0,
         });
-        const relaxedCandidates = isSpecialCategory
-          ? collectCategoryBuckets(relaxedPayload).filter(isSpecialThemeAnime)
-          : collectCategoryBuckets(relaxedPayload);
+        const relaxedCandidates = filterByCategory(category.id, collectCategoryBuckets(relaxedPayload));
         nextList = distributeBySubcategory(
           category.id,
           shuffleArray(dedupeByFranchise([...nextList, ...relaxedCandidates])),
@@ -1238,10 +1330,10 @@ export default function App() {
           specialExploreVariables,
           { retries: 2 },
         );
-        const exploreCandidates = dedupeByFranchise([
+        const exploreCandidates = filterByCategory(category.id, dedupeByFranchise([
           ...(explorePayload.trending?.media ?? []),
           ...(explorePayload.highScore?.media ?? []),
-        ]).filter(isSpecialThemeAnime);
+        ]));
         nextList = distributeBySubcategory(
           category.id,
           shuffleArray(dedupeByFranchise([...nextList, ...exploreCandidates])),
@@ -1287,10 +1379,6 @@ export default function App() {
     try {
       const allowedFormats = new Set(["TV", "OVA", "ONA", "TV_SHORT"]);
       const seedProfile = buildSeedProfile(pickedBaseAnimes);
-      const topGenres = [...seedProfile.weightedGenre.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([genre]) => genre);
       const topTags = [...seedProfile.weightedTag.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
@@ -1312,6 +1400,7 @@ export default function App() {
           const candidate = node.mediaRecommendation;
           if (!candidate || seedSet.has(candidate.id)) return;
           if (candidate.format && !allowedFormats.has(candidate.format)) return;
+          if (!isCategoryAligned(selectedCategory.id, candidate)) return;
 
           const rawSignal = Math.max(0, node.rating ?? 0);
           const normalizedGraphSignal = Math.log10(rawSignal + 1) * 12;
@@ -1322,7 +1411,7 @@ export default function App() {
       });
 
       const finalVariables: Record<string, unknown> = {
-        genreIn: topGenres.length ? topGenres : selectedCategory.genres,
+        genreIn: selectedCategory.genres,
         page: 1,
         perPage: 80,
         excludeIds: seedIds,
@@ -1333,7 +1422,7 @@ export default function App() {
       }
 
       const exploreVariables: Record<string, unknown> = {
-        genreIn: topGenres.length ? topGenres : selectedCategory.genres,
+        genreIn: selectedCategory.genres,
         page: 1,
         perPage: 60,
         excludeIds: seedIds,
@@ -1347,6 +1436,7 @@ export default function App() {
       graphCandidates.forEach((anime) => mergedCandidates.set(anime.id, anime));
       dedupeByFranchise(fallbackData.Page.media ?? [])
         .filter((anime) => !seedSet.has(anime.id))
+        .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
         .forEach((anime) => {
           if (!mergedCandidates.has(anime.id)) mergedCandidates.set(anime.id, anime);
         });
@@ -1355,12 +1445,14 @@ export default function App() {
         ...(exploreData.highScore?.media ?? []),
       ])
         .filter((anime) => !seedSet.has(anime.id))
+        .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
         .forEach((anime) => {
           if (!mergedCandidates.has(anime.id)) mergedCandidates.set(anime.id, anime);
         });
 
       const ranked = dedupeByFranchise(Array.from(mergedCandidates.values()))
         .filter((anime) => !seedSet.has(anime.id))
+        .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
         .map((anime) => {
           const detail = scoreCandidateDetailed(anime, seedProfile, graphScoreById.get(anime.id) ?? 0);
           return {
