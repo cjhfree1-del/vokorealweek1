@@ -9,7 +9,8 @@
     "build": "tsc",
     "lint": "eslint src --ext .ts",
     "serve": "firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "sync:ko-fallback": "node scripts/sync-ko-title-fallback.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0",
