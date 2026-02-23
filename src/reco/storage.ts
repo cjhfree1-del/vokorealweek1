@@ -1,19 +1,8 @@
-import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
-import {
-  arrayUnion,
-  doc,
-  getDoc,
-  getFirestore,
-  serverTimestamp,
-  setDoc,
-  type Firestore,
-  type Timestamp,
-} from "firebase/firestore";
 import { createEmptyUserProfile, normalizeUserProfile, type UserProfile } from "./userProfile";
 
 const ANON_USER_ID_KEY = "voko_anon_user_id_v1";
 let firebaseInitLogged = false;
-let firestoreInstance: Firestore | null | undefined;
+let runtimePromise: Promise<FirebaseRuntime | null> | null = null;
 
 export type SessionStep = {
   stepIndex: number;
@@ -21,6 +10,28 @@ export type SessionStep = {
   likedMediaIds: number[];
   dislikedMediaIds: number[];
   timestamp: string;
+};
+
+type FirebaseOptions = {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  measurementId?: string;
+};
+
+type FirestoreTimestampLike = {
+  toDate?: () => Date;
+};
+
+type FirestoreModule = typeof import("firebase/firestore");
+type FirestoreDb = ReturnType<FirestoreModule["getFirestore"]>;
+
+type FirebaseRuntime = {
+  firestore: FirestoreModule;
+  db: FirestoreDb;
 };
 
 function uuidv4(): string {
@@ -32,7 +43,7 @@ function uuidv4(): string {
 
 function parseDateLike(value: unknown): string | undefined {
   if (typeof value === "string") return value;
-  const timestamp = value as Timestamp | undefined;
+  const timestamp = value as FirestoreTimestampLike | undefined;
   if (timestamp && typeof timestamp.toDate === "function") {
     return timestamp.toDate().toISOString();
   }
@@ -77,41 +88,40 @@ function firebaseConfigFromEnv(): FirebaseOptions | null {
   return config;
 }
 
-function getFirestoreOrNull(): Firestore | null {
-  if (firestoreInstance !== undefined) return firestoreInstance;
-
+async function getFirebaseRuntimeOrNull(): Promise<FirebaseRuntime | null> {
+  if (runtimePromise) return runtimePromise;
   const config = firebaseConfigFromEnv();
-  if (!config) {
-    firestoreInstance = null;
-    return null;
-  }
+  runtimePromise = (async () => {
+    if (!config) return null;
+    try {
+      const appModule = await import("firebase/app");
+      const firestoreModule = await import("firebase/firestore");
+      const app = appModule.getApps().length ? appModule.getApp() : appModule.initializeApp(config);
+      const db = firestoreModule.getFirestore(app);
+      return {
+        firestore: firestoreModule,
+        db,
+      };
+    } catch {
+      return null;
+    }
+  })();
 
-  try {
-    const app = getApps().length ? getApp() : initializeApp(config);
-    firestoreInstance = getFirestore(app);
-  } catch {
-    firestoreInstance = null;
-  }
-
-  if (!firestoreInstance && !firebaseInitLogged) {
+  const runtime = await runtimePromise;
+  if (!runtime && !firebaseInitLogged) {
     firebaseInitLogged = true;
-    console.warn("[RECO][PROFILE] Firebase init skipped (missing config or init failure).");
+    console.warn("[RECO][PROFILE] Firebase init skipped or failed.");
   }
-
-  return firestoreInstance;
+  return runtime;
 }
 
-function profileDoc(userId: string) {
-  const db = getFirestoreOrNull();
-  if (!db) return null;
+function profileDoc(runtime: FirebaseRuntime, userId: string) {
   // users/{anonUserId}/profile/profile
-  return doc(db, "users", userId, "profile", "profile");
+  return runtime.firestore.doc(runtime.db, "users", userId, "profile", "profile");
 }
 
-function sessionDoc(userId: string, sessionId: string) {
-  const db = getFirestoreOrNull();
-  if (!db) return null;
-  return doc(db, "users", userId, "sessions", sessionId);
+function sessionDoc(runtime: FirebaseRuntime, userId: string, sessionId: string) {
+  return runtime.firestore.doc(runtime.db, "users", userId, "sessions", sessionId);
 }
 
 function normalizeStepPayload(step: SessionStep): SessionStep {
@@ -141,10 +151,11 @@ export function createSessionId(): string {
 }
 
 export async function readUserProfile(userId: string): Promise<UserProfile> {
-  const ref = profileDoc(userId);
-  if (!ref) return createEmptyUserProfile();
+  const runtime = await getFirebaseRuntimeOrNull();
+  if (!runtime) return createEmptyUserProfile();
 
-  const snap = await getDoc(ref);
+  const ref = profileDoc(runtime, userId);
+  const snap = await runtime.firestore.getDoc(ref);
   if (!snap.exists()) return createEmptyUserProfile();
 
   const data = snap.data() as Record<string, unknown>;
@@ -157,16 +168,17 @@ export async function readUserProfile(userId: string): Promise<UserProfile> {
 }
 
 export async function writeUserProfile(userId: string, profile: UserProfile): Promise<void> {
-  const ref = profileDoc(userId);
-  if (!ref) return;
+  const runtime = await getFirebaseRuntimeOrNull();
+  if (!runtime) return;
   const safe = normalizeUserProfile(profile);
-  await setDoc(
+  const ref = profileDoc(runtime, userId);
+  await runtime.firestore.setDoc(
     ref,
     {
       likedTags: safe.likedTags,
       dislikedTags: safe.dislikedTags,
       exposureHistory: safe.exposureHistory,
-      updatedAt: serverTimestamp(),
+      updatedAt: runtime.firestore.serverTimestamp(),
     },
     { merge: true },
   );
@@ -177,14 +189,15 @@ export async function ensureUserSession(
   sessionId: string,
   category: string,
 ): Promise<void> {
-  const ref = sessionDoc(userId, sessionId);
-  if (!ref) return;
-  await setDoc(
+  const runtime = await getFirebaseRuntimeOrNull();
+  if (!runtime) return;
+  const ref = sessionDoc(runtime, userId, sessionId);
+  await runtime.firestore.setDoc(
     ref,
     {
       category,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: runtime.firestore.serverTimestamp(),
+      updatedAt: runtime.firestore.serverTimestamp(),
     },
     { merge: true },
   );
@@ -196,15 +209,16 @@ export async function appendSessionStep(
   category: string,
   step: SessionStep,
 ): Promise<void> {
-  const ref = sessionDoc(userId, sessionId);
-  if (!ref) return;
+  const runtime = await getFirebaseRuntimeOrNull();
+  if (!runtime) return;
+  const ref = sessionDoc(runtime, userId, sessionId);
   const payload = normalizeStepPayload(step);
-  await setDoc(
+  await runtime.firestore.setDoc(
     ref,
     {
       category,
-      updatedAt: serverTimestamp(),
-      steps: arrayUnion(payload),
+      updatedAt: runtime.firestore.serverTimestamp(),
+      steps: runtime.firestore.arrayUnion(payload),
     },
     { merge: true },
   );

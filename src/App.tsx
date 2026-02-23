@@ -91,6 +91,11 @@ const ANILIST_REQUEST_GAP_MS = 120;
 const ANILIST_MAX_CONCURRENT = 3;
 const STEP2_MAX_PICKS = 12;
 const STEP2_MIN_PICKS_FOR_FINAL = 3;
+const STEP2_PRESET_LIMIT = 4;
+const STEP2_DISCOVERY_PAGE_SIZE = 20;
+const STEP2_DISCOVERY_BATCH_SIZE = 6;
+const STEP2_DISCOVERY_EARLY_STOP_BUFFER = 40;
+const STEP2_CATEGORY_CACHE_TTL_MS = 3 * 60 * 1000;
 
 const { byMalId: KOREAN_TITLE_BY_MAL_ID, byAlias: KOREAN_TITLE_BY_KEY } = buildKoFallbackIndexes();
 
@@ -99,6 +104,7 @@ const KO_TITLE_MISS_KEY = "voko_ko_title_miss_v1";
 const TMDB_API_KEY = (import.meta.env.VITE_TMDB_API_KEY as string | undefined)?.trim();
 const HAS_LOCALIZE_API = Boolean((import.meta.env.VITE_LOCALIZE_ANIME_ENDPOINT as string | undefined)?.trim());
 const TITLE_LOOKUP_MAX_CONCURRENT = 4;
+const TITLE_LOOKUP_BATCH_SIZE = 12;
 
 type MissingTitleRecord = {
   id: number;
@@ -466,6 +472,18 @@ function parseRetryAfterMs(value: string | null): number | null {
   return null;
 }
 
+function toUserFacingAniError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  const message = error.message || "";
+  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed/i.test(message.toLowerCase())) {
+    return "네트워크 연결 문제로 AniList 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  if (/too many|rate|429/i.test(message.toLowerCase())) {
+    return "요청이 몰려 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  return message || fallback;
+}
+
 let lastAniRequestAt = 0;
 let activeAniRequests = 0;
 const aniRequestWaiters: Array<() => void> = [];
@@ -520,15 +538,23 @@ async function aniFetch<T>(
       const waitGap = Math.max(0, ANILIST_REQUEST_GAP_MS - (Date.now() - lastAniRequestAt));
       if (waitGap > 0) await sleep(waitGap);
       lastAniRequestAt = Date.now();
-
-      const res = await fetch(ANILIST_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ query, variables }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(ANILIST_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ query, variables }),
+        });
+      } catch (error) {
+        if (attempt < maxRetries) {
+          await sleep(ANILIST_BASE_RETRY_MS * 2 ** attempt);
+          continue;
+        }
+        throw error instanceof Error ? error : new Error("AniList 네트워크 요청 실패");
+      }
 
       if (res.ok) {
         const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
@@ -587,6 +613,7 @@ export default function App() {
   const userProfileRef = useRef<UserProfile>(createEmptyUserProfile());
   const anonUserIdRef = useRef<string>("");
   const sessionIdRef = useRef<string>("");
+  const categoryCacheRef = useRef<Map<string, { cachedAt: number; items: Anime[] }>>(new Map());
 
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
@@ -741,8 +768,36 @@ export default function App() {
     const excludeSet = new Set(excludeIds);
     const debug = recoDebugEnabled();
 
+    function applyStep2List(nextList: Anime[]): void {
+      const nextShownIds = nextList.slice(0, STEP2_TARGET_COUNT).map((anime) => anime.id);
+      const nextLikedIds = mode === "reset" ? [] : pickedBaseAnimes.map((anime) => anime.id);
+      const nextDislikedIds = mode === "reset" ? [] : dislikedBaseAnimeIds;
+
+      setCategoryAnimes(nextList.slice(0, STEP2_TARGET_COUNT));
+      setShownStep2MediaIds(nextShownIds);
+      setSeenCategoryIds((prev) => {
+        const base = mode === "reset" ? [] : prev;
+        return Array.from(new Set([...base, ...nextList.map((a) => a.id)])).slice(-500);
+      });
+
+      const profileAfterExposure = updateExposureHistory(userProfileRef.current, nextShownIds);
+      persistUserProfile(profileAfterExposure);
+      appendStepSnapshot(nextShownIds, nextLikedIds, nextDislikedIds);
+    }
+
     try {
-      const presets = getCategoryDiscoveryPresets(category.id, category.genres);
+      if (mode === "reset") {
+        const cached = categoryCacheRef.current.get(category.id);
+        if (cached && Date.now() - cached.cachedAt <= STEP2_CATEGORY_CACHE_TTL_MS) {
+          if (debug) {
+            console.info(`[RECO][STEP2] cache hit category=${category.id} items=${cached.items.length}`);
+          }
+          applyStep2List(cached.items);
+          return;
+        }
+      }
+
+      const presets = getCategoryDiscoveryPresets(category.id, category.genres).slice(0, STEP2_PRESET_LIMIT);
       const candidateById = new Map<number, Anime>();
 
       async function runDiscoveryPass(
@@ -750,9 +805,10 @@ export default function App() {
         minPopularity: number,
         page: number,
         perPage: number,
+        sorts: Array<(typeof STEP2_DISCOVERY_SORTS)[number]>,
       ): Promise<void> {
         const plans = presets.flatMap((preset) =>
-          STEP2_DISCOVERY_SORTS.map((sort) => ({
+          sorts.map((sort) => ({
             genreIn: preset.genreIn.length ? preset.genreIn : category.genres,
             tagIn: preset.tagIn && preset.tagIn.length ? preset.tagIn : undefined,
             sort,
@@ -762,50 +818,84 @@ export default function App() {
           })),
         );
 
-        const responses = await Promise.all(
-          plans.map((plan) =>
-            aniFetch<DiscoveryPayload>(
-              DISCOVERY_MEDIA_QUERY,
-              {
-                genreIn: plan.genreIn,
-                tagIn: plan.tagIn,
-                sort: [plan.sort],
-                page,
-                perPage: plan.perPage,
-                excludeIds,
-                minAverageScore: plan.minAverageScore,
-                minPopularity: plan.minPopularity,
-              },
-              { retries: 2 },
+        let successCount = 0;
+        let failureCount = 0;
+        let lastFailure: unknown = null;
+        const queue = [...plans];
+
+        while (queue.length) {
+          if (candidateById.size >= STEP2_POOL_MAX + STEP2_DISCOVERY_EARLY_STOP_BUFFER) break;
+          const batch = queue.splice(0, STEP2_DISCOVERY_BATCH_SIZE);
+          const settled = await Promise.allSettled(
+            batch.map((plan) =>
+              aniFetch<DiscoveryPayload>(
+                DISCOVERY_MEDIA_QUERY,
+                {
+                  genreIn: plan.genreIn,
+                  tagIn: plan.tagIn,
+                  sort: [plan.sort],
+                  page,
+                  perPage: plan.perPage,
+                  excludeIds,
+                  minAverageScore: plan.minAverageScore,
+                  minPopularity: plan.minPopularity,
+                },
+                { retries: 2 },
+              ),
             ),
-          ),
-        );
+          );
 
-        responses.forEach((response, index) => {
-          const plan = plans[index];
-          const media = filterByCategory(category.id, response.Page?.media ?? []);
-          media.forEach((anime) => {
-            if (excludeSet.has(anime.id)) return;
-            if ((anime.popularity ?? 0) < plan.minPopularity) return;
-            if (getScoreValue(anime) < plan.minAverageScore) return;
-
-            const prev = candidateById.get(anime.id);
-            if (!prev) {
-              candidateById.set(anime.id, anime);
-            } else {
-              const prevComposite = (prev.popularity ?? 0) + getScoreValue(prev) * 100;
-              const nextComposite = (anime.popularity ?? 0) + getScoreValue(anime) * 100;
-              if (nextComposite > prevComposite) candidateById.set(anime.id, anime);
+          settled.forEach((result, index) => {
+            const plan = batch[index];
+            if (result.status !== "fulfilled") {
+              failureCount += 1;
+              lastFailure = result.reason;
+              return;
             }
+            successCount += 1;
+            const media = filterByCategory(category.id, result.value.Page?.media ?? []);
+            media.forEach((anime) => {
+              if (excludeSet.has(anime.id)) return;
+              if ((anime.popularity ?? 0) < plan.minPopularity) return;
+              if (getScoreValue(anime) < plan.minAverageScore) return;
+
+              const prev = candidateById.get(anime.id);
+              if (!prev) {
+                candidateById.set(anime.id, anime);
+              } else {
+                const prevComposite = (prev.popularity ?? 0) + getScoreValue(prev) * 100;
+                const nextComposite = (anime.popularity ?? 0) + getScoreValue(anime) * 100;
+                if (nextComposite > prevComposite) candidateById.set(anime.id, anime);
+              }
+            });
           });
-        });
+        }
+
+        if (debug && failureCount > 0) {
+          console.warn(`[RECO][STEP2] AniList partial failure ${failureCount}/${plans.length}`);
+        }
+        if (successCount === 0 && lastFailure) {
+          throw lastFailure instanceof Error ? lastFailure : new Error("AniList 요청 실패");
+        }
       }
 
-      await runDiscoveryPass(STEP2_MIN_AVERAGE_SCORE, STEP2_MIN_POPULARITY, 1, 24);
+      await runDiscoveryPass(
+        STEP2_MIN_AVERAGE_SCORE,
+        STEP2_MIN_POPULARITY,
+        1,
+        STEP2_DISCOVERY_PAGE_SIZE,
+        STEP2_DISCOVERY_SORTS.slice(0, 2),
+      );
       let candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
 
       if (candidatePool.length < STEP2_POOL_MIN) {
-        await runDiscoveryPass(STEP2_RELAXED_MIN_AVERAGE_SCORE, STEP2_RELAXED_MIN_POPULARITY, 2, 24);
+        await runDiscoveryPass(
+          STEP2_RELAXED_MIN_AVERAGE_SCORE,
+          STEP2_RELAXED_MIN_POPULARITY,
+          2,
+          STEP2_DISCOVERY_PAGE_SIZE,
+          STEP2_DISCOVERY_SORTS,
+        );
         candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
       }
 
@@ -853,22 +943,14 @@ export default function App() {
         console.groupEnd();
       }
 
-      const nextShownIds = nextList.slice(0, STEP2_TARGET_COUNT).map((anime) => anime.id);
-      const nextLikedIds = mode === "reset" ? [] : pickedBaseAnimes.map((anime) => anime.id);
-      const nextDislikedIds = mode === "reset" ? [] : dislikedBaseAnimeIds;
-
-      setCategoryAnimes(nextList.slice(0, STEP2_TARGET_COUNT));
-      setShownStep2MediaIds(nextShownIds);
-      setSeenCategoryIds((prev) => {
-        const base = mode === "reset" ? [] : prev;
-        return Array.from(new Set([...base, ...nextList.map((a) => a.id)])).slice(-500);
+      const step2List = nextList.slice(0, STEP2_TARGET_COUNT);
+      categoryCacheRef.current.set(category.id, {
+        cachedAt: Date.now(),
+        items: step2List,
       });
-
-      const profileAfterExposure = updateExposureHistory(userProfileRef.current, nextShownIds);
-      persistUserProfile(profileAfterExposure);
-      appendStepSnapshot(nextShownIds, nextLikedIds, nextDislikedIds);
+      applyStep2List(step2List);
     } catch (error) {
-      setCategoryError(error instanceof Error ? error.message : "목록을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.");
+      setCategoryError(toUserFacingAniError(error, "목록을 가져오지 못했어요. 잠시 후 다시 시도해 주세요."));
     } finally {
       setCategoryLoading(false);
     }
@@ -942,11 +1024,22 @@ export default function App() {
 
       const graphCandidates = new Map<number, Anime>();
 
-      const graphResponses = await Promise.all(
+      const graphSettled = await Promise.allSettled(
         seedIds.slice(0, 8).map((id) =>
           aniFetch<RecommendationPayload>(RECOMMENDATION_QUERY, { id }, { retries: 2 }),
         ),
       );
+      const graphResponses = graphSettled
+        .filter((result): result is PromiseFulfilledResult<RecommendationPayload> => result.status === "fulfilled")
+        .map((result) => result.value);
+      if (!graphResponses.length) {
+        const firstFailure = graphSettled.find((result) => result.status === "rejected");
+        throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error("추천 그래프 요청 실패");
+      }
+      if (debug) {
+        const failureCount = graphSettled.filter((result) => result.status === "rejected").length;
+        if (failureCount > 0) console.warn(`[RECO][FINAL] graph partial failure ${failureCount}/${graphSettled.length}`);
+      }
 
       graphResponses.forEach((response) => {
         (response.Media?.recommendations?.nodes ?? []).forEach((node) => {
@@ -958,7 +1051,7 @@ export default function App() {
         });
       });
 
-      const presets = getCategoryDiscoveryPresets(selectedCategory.id, selectedCategory.genres).slice(0, 5);
+      const presets = getCategoryDiscoveryPresets(selectedCategory.id, selectedCategory.genres).slice(0, 3);
       const discoverPlans = [
         ...STEP2_DISCOVERY_SORTS.map((sort) => ({
           genreIn: selectedCategory.genres,
@@ -989,7 +1082,7 @@ export default function App() {
         },
       ];
 
-      const discoverResponses = await Promise.all(
+      const discoverSettled = await Promise.allSettled(
         discoverPlans.map((plan) =>
           aniFetch<DiscoveryPayload>(
             DISCOVERY_MEDIA_QUERY,
@@ -1007,6 +1100,19 @@ export default function App() {
           ),
         ),
       );
+      const discoverResponses = discoverSettled
+        .filter((result): result is PromiseFulfilledResult<DiscoveryPayload> => result.status === "fulfilled")
+        .map((result) => result.value);
+      if (!discoverResponses.length) {
+        const firstFailure = discoverSettled.find((result) => result.status === "rejected");
+        throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error("추천 탐색 요청 실패");
+      }
+      if (debug) {
+        const failureCount = discoverSettled.filter((result) => result.status === "rejected").length;
+        if (failureCount > 0) {
+          console.warn(`[RECO][FINAL] discovery partial failure ${failureCount}/${discoverSettled.length}`);
+        }
+      }
 
       const mergedCandidates = new Map<number, Anime>();
       graphCandidates.forEach((anime) => mergedCandidates.set(anime.id, anime));
@@ -1121,7 +1227,7 @@ export default function App() {
         })),
       );
     } catch (error) {
-      setFinalError(error instanceof Error ? error.message : "추천 결과를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
+      setFinalError(toUserFacingAniError(error, "추천 결과를 만들지 못했어요. 잠시 후 다시 시도해 주세요."));
     } finally {
       setFinalLoading(false);
     }
@@ -1142,7 +1248,7 @@ export default function App() {
       const unresolved = visibleAnimesForKoLookup.filter((anime) => {
         const key = cacheKey(anime);
         return !koTitleCache[key] && !lookupInFlight.current.has(key) && !lookupFailed.current.has(key);
-      });
+      }).slice(0, TITLE_LOOKUP_BATCH_SIZE);
       if (!unresolved.length) return;
 
       for (const anime of unresolved) {
@@ -1308,8 +1414,8 @@ export default function App() {
                   <img
                     src={anime.coverImage?.medium || anime.coverImage?.large || ""}
                     alt={getTitle(anime, koTitleCache)}
-                    loading={index < 4 ? "eager" : "lazy"}
-                    fetchPriority={index < 4 ? "high" : "low"}
+                    loading={index < 2 ? "eager" : "lazy"}
+                    fetchPriority={index < 2 ? "high" : "low"}
                     decoding="async"
                   />
                   <div className="card-body">
