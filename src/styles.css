@@ -34,12 +34,14 @@ body {
 
 .page.landing {
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  padding-top: clamp(2px, 0.8vw, 8px);
-  padding-bottom: clamp(36px, 4.2vw, 48px);
+  align-items: center;
+  justify-content: center;
+  padding-top: clamp(24px, 5vh, 80px);
+  padding-bottom: clamp(24px, 6vh, 96px);
+  transform: translateY(-3vh);
 }
 
 .hero {
@@ -52,9 +54,14 @@ body {
 }
 
 .page.landing .hero {
-  margin-top: clamp(8px, 1.2vw, 14px);
-  min-height: 40vh;
-  justify-content: flex-start;
+  width: 100%;
+  max-width: 960px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
 }
 
 .kicker {
@@ -69,7 +76,7 @@ body {
   border: 2px solid #ffc0d8;
   background: rgba(255, 255, 255, 0.82);
   cursor: pointer;
-  margin-top: 4px;
+  margin-top: 0;
   padding: 12px 28px;
   text-transform: uppercase;
   font-family: "Jua", "Noto Sans KR", sans-serif;
@@ -85,7 +92,7 @@ body {
 }
 
 h1 {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: clamp(1.85rem, 3.5vw, 2.8rem);
   line-height: 1.16;
   font-family: "Jua", "Noto Sans KR", sans-serif;
@@ -100,12 +107,16 @@ h1 {
   max-width: min(900px, 95%);
 }
 
+.page.landing .logo-button {
+  margin: 0 0 clamp(18px, 2.6vh, 28px);
+}
+
 .page.landing h1 {
-  margin-top: clamp(14vh, 16vh, 20vh);
+  margin: 0 0 clamp(10px, 1.8vh, 18px);
 }
 
 .hero-guide {
-  margin: 4px 0 0;
+  margin: 0;
   max-width: min(760px, 94%);
   padding: 8px 14px;
   border-radius: 999px;
@@ -115,6 +126,10 @@ h1 {
   font-size: clamp(0.96rem, 1.6vw, 1.05rem);
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+
+.page.landing .hero-guide {
+  margin: 0 0 clamp(28px, 4vh, 44px);
 }
 
 .panel {
@@ -142,23 +157,25 @@ h1 {
 }
 
 .step1-panel {
-  max-width: 1140px;
+  width: 100%;
+  max-width: 1200px;
   margin: 10px auto 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
 }
 
 .page.landing .step1-panel {
-  flex: 1;
   width: 100%;
-  justify-content: center;
-  margin: 0 auto;
-  gap: 16px;
+  max-width: 1200px;
+  margin: clamp(0px, 1vh, 12px) auto 0;
+  justify-content: flex-start;
+  gap: 0;
 }
 
 .step1-lead {
-  margin: 0 0 14px;
+  margin: 0 0 clamp(14px, 2.2vh, 22px);
   color: #2f5f79;
   font-size: clamp(1.08rem, 1.9vw, 1.24rem);
   font-weight: 700;
@@ -168,6 +185,7 @@ h1 {
   position: relative;
   width: min(100%, 1180px);
   margin-inline: auto;
+  margin-bottom: clamp(24px, 3.6vh, 40px);
   height: clamp(480px, 56vh, 560px);
   display: flex;
   border-radius: 24px;
@@ -565,14 +583,6 @@ h1 {
 }
 
 @media (max-width: 1080px) {
-  .page.landing .hero {
-    min-height: 34vh;
-  }
-
-  .page.landing h1 {
-    margin-top: clamp(11vh, 13vh, 16vh);
-  }
-
   .category-strip {
     height: clamp(360px, 46vh, 430px);
   }
@@ -594,25 +604,49 @@ h1 {
   }
 }
 
+@media (max-width: 768px) {
+  .page.landing {
+    transform: none;
+    padding-top: clamp(16px, 4vh, 48px);
+    padding-bottom: clamp(16px, 4vh, 48px);
+  }
+
+  .page.landing .logo-button {
+    margin-bottom: clamp(16px, 2.1vh, 22px);
+  }
+
+  .page.landing h1 {
+    margin-bottom: clamp(9px, 1.6vh, 15px);
+  }
+
+  .page.landing .hero-guide {
+    margin-bottom: clamp(24px, 3.4vh, 36px);
+  }
+
+  .page.landing .step1-panel {
+    margin-top: clamp(0px, 0.6vh, 8px);
+  }
+
+  .page.landing .step1-lead {
+    margin-bottom: clamp(12px, 1.8vh, 18px);
+  }
+
+  .page.landing .category-strip {
+    margin-bottom: clamp(20px, 3vh, 32px);
+  }
+}
+
 @media (max-width: 700px) {
   .page {
     padding: 24px 12px 36px;
   }
 
   .page.landing {
-    justify-content: flex-start;
-    padding-top: 8px;
-    padding-bottom: 40px;
+    justify-content: center;
   }
 
   .page.landing .hero {
-    margin-top: 6px;
-    margin-bottom: 16px;
-    min-height: auto;
-  }
-
-  .page.landing h1 {
-    margin-top: 12px;
+    margin: 0;
   }
 
   .step1-panel {
@@ -620,9 +654,9 @@ h1 {
   }
 
   .page.landing .step1-panel {
-    gap: 12px;
-    justify-content: center;
-    margin: 2px auto 0;
+    gap: 0;
+    justify-content: flex-start;
+    margin: 0 auto;
   }
 
   .category-strip {
