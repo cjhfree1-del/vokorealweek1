@@ -1,92 +1,51 @@
 import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { buildKoFallbackIndexes, normalizeKoFallbackKey } from "./data/koTitleFallbackRepo";
 import { localizeAnimeFromApi } from "./api/localizeAnimeClient";
-
-type Anime = {
-  id: number;
-  idMal?: number;
-  format?: string;
-  title: {
-    romaji?: string;
-    english?: string;
-    native?: string;
-  };
-  synonyms?: string[];
-  description?: string;
-  coverImage?: {
-    large?: string;
-    medium?: string;
-  };
-  genres?: string[];
-  tags?: Array<{ name?: string; rank?: number }>;
-  meanScore?: number;
-  popularity?: number;
-  seasonYear?: number;
-};
-
-type Category = {
-  id: string;
-  label: string;
-  genres: string[];
-  previewImage: string;
-  previewFocus?: string;
-};
-
-type SubcategoryRule = {
-  id: string;
-  match: (anime: Anime) => boolean;
-};
-
-type FinalRecommendation = {
-  anime: Anime;
-  score: number;
-  reason: string;
-};
-
-type CategoryBucketPayload = {
-  trending?: { media?: Anime[] };
-  popular?: { media?: Anime[] };
-  topRated?: { media?: Anime[] };
-};
-
-type RecommendationPayload = {
-  Media?: {
-    recommendations?: {
-      nodes?: Array<{
-        rating?: number;
-        mediaRecommendation?: Anime;
-      }>;
-    };
-  };
-};
-
-type CandidateExplorePayload = {
-  trending?: { media?: Anime[] };
-  highScore?: { media?: Anime[] };
-};
-
-type SeedProfile = {
-  weightedGenre: Map<string, number>;
-  weightedTag: Map<string, number>;
-  strongGenres: Set<string>;
-  strongTags: Set<string>;
-  recentGenres: Set<string>;
-  recentTags: Set<string>;
-};
-
-type CandidateScoreDetail = {
-  total: number;
-  genreScore: number;
-  tagScore: number;
-  strongBoost: number;
-  recencyBoost: number;
-  graphBoost: number;
-  qualityBoost: number;
-  popularityBoost: number;
-  matchedGenres: string[];
-  matchedStrongGenres: string[];
-  matchedStrongTags: string[];
-};
+import { ANILIST_ENDPOINT, DISCOVERY_MEDIA_QUERY, RECOMMENDATION_QUERY } from "./reco/anilistQueries";
+import {
+  filterByCategory,
+  FINAL_MMR_TOP_N,
+  getCategoryDiscoveryPresets,
+  isCategoryAligned,
+  selectFinalWithMMR,
+  selectStep2DiverseCandidates,
+  STEP2_DISCOVERY_SORTS,
+  STEP2_MIN_AVERAGE_SCORE,
+  STEP2_MIN_POPULARITY,
+  STEP2_POOL_MAX,
+  STEP2_POOL_MIN,
+  STEP2_RELAXED_MIN_AVERAGE_SCORE,
+  STEP2_RELAXED_MIN_POPULARITY,
+  STEP2_TARGET_COUNT,
+} from "./reco/diversity";
+import {
+  appendSessionStep,
+  createSessionId,
+  ensureUserSession,
+  getOrCreateAnonUserId,
+  readUserProfile,
+  writeUserProfile,
+} from "./reco/storage";
+import {
+  buildFinalReason,
+  buildSeedPreferenceVector,
+  dominantTagNames,
+  getScoreValue,
+  scoreFinalCandidate,
+  topPreferenceTags,
+} from "./reco/scoring";
+import {
+  createEmptyUserProfile,
+  PROFILE_EXPOSURE_LIMIT,
+  scoreWithProfile,
+  topDislikedTags,
+  topLikedTags,
+  updateExposureHistory,
+  updateProfileFromFeedback,
+  type FeedbackSignal,
+  type UserProfile,
+} from "./reco/userProfile";
+import type { Anime, Category, DiscoveryPayload, FinalRecommendation, RecommendationPayload } from "./reco/types";
 
 const CATEGORIES: Category[] = [
   {
@@ -126,252 +85,10 @@ const CATEGORIES: Category[] = [
   },
 ];
 
-const SUBCATEGORY_RULES: Record<string, SubcategoryRule[]> = {
-  action: [
-    { id: "battle", match: (a) => (a.tags ?? []).some((t) => /battle|fight|war/i.test(t.name ?? "")) },
-    { id: "adventure", match: (a) => (a.genres ?? []).includes("Adventure") || (a.tags ?? []).some((t) => /journey|travel/i.test(t.name ?? "")) },
-    { id: "superpower", match: (a) => (a.tags ?? []).some((t) => /super power|hero|martial/i.test(t.name ?? "")) },
-    { id: "military", match: (a) => (a.tags ?? []).some((t) => /military|army|weapon/i.test(t.name ?? "")) },
-    { id: "mecha", match: (a) => (a.tags ?? []).some((t) => /mecha|robot/i.test(t.name ?? "")) },
-    { id: "sports_action", match: (a) => (a.genres ?? []).includes("Sports") },
-  ],
-  romance: [
-    { id: "school", match: (a) => (a.tags ?? []).some((t) => /school|teen|coming of age/i.test(t.name ?? "")) },
-    { id: "adult", match: (a) => (a.tags ?? []).some((t) => /adult cast|office|workplace/i.test(t.name ?? "")) },
-    { id: "melodrama", match: (a) => (a.tags ?? []).some((t) => /tragedy|love triangle|drama/i.test(t.name ?? "")) },
-    { id: "romcom", match: (a) => (a.genres ?? []).includes("Comedy") && (a.genres ?? []).includes("Romance") },
-    { id: "music_romance", match: (a) => (a.genres ?? []).includes("Music") },
-    { id: "fantasy_romance", match: (a) => (a.tags ?? []).some((t) => /isekai|fantasy/i.test(t.name ?? "")) },
-  ],
-  healing: [
-    { id: "daily", match: (a) => (a.genres ?? []).includes("Slice of Life") },
-    { id: "comfy", match: (a) => (a.tags ?? []).some((t) => /iyashikei|healing|wholesome/i.test(t.name ?? "")) },
-    { id: "comedy", match: (a) => (a.genres ?? []).includes("Comedy") },
-    { id: "food", match: (a) => (a.tags ?? []).some((t) => /food|cooking|gourmet/i.test(t.name ?? "")) },
-    { id: "family", match: (a) => (a.tags ?? []).some((t) => /family|childcare|friendship/i.test(t.name ?? "")) },
-    { id: "school_daily", match: (a) => (a.tags ?? []).some((t) => /school|club/i.test(t.name ?? "")) },
-  ],
-  psychological: [
-    { id: "mind", match: (a) => (a.tags ?? []).some((t) => /mind game|psychological|manipulation/i.test(t.name ?? "")) },
-    { id: "mystery", match: (a) => (a.genres ?? []).includes("Mystery") },
-    { id: "dark", match: (a) => (a.tags ?? []).some((t) => /trauma|depression|existential/i.test(t.name ?? "")) },
-    { id: "philosophy", match: (a) => (a.tags ?? []).some((t) => /philosophy|existential/i.test(t.name ?? "")) },
-    { id: "thriller_psy", match: (a) => (a.genres ?? []).includes("Thriller") },
-    { id: "court_game", match: (a) => (a.tags ?? []).some((t) => /gambling|strategy|game/i.test(t.name ?? "")) },
-  ],
-  special: [
-    { id: "music", match: (a) => (a.genres ?? []).includes("Music") || (a.tags ?? []).some((t) => /band|idol|music|singer|concert/i.test(t.name ?? "")) },
-    { id: "idol", match: (a) => (a.tags ?? []).some((t) => /idol/i.test(t.name ?? "")) },
-    { id: "cooking", match: (a) => (a.tags ?? []).some((t) => /food|cooking|gourmet|restaurant|cafe|chef/i.test(t.name ?? "")) },
-    { id: "work", match: (a) => (a.tags ?? []).some((t) => /workplace|office|job|profession|career|teacher|doctor|nurse|bartender|maid/i.test(t.name ?? "")) },
-    { id: "sports", match: (a) => (a.genres ?? []).includes("Sports") || (a.tags ?? []).some((t) => /basketball|baseball|soccer|volleyball|swimming|athlete/i.test(t.name ?? "")) },
-  ],
-};
-
-const CATEGORY_BUCKET_QUERY = `
-query ($genreIn: [String], $excludeIds: [Int], $minScore: Int, $minPopularity: Int) {
-  trending: Page(page: 1, perPage: 20) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      averageScore_greater: $minScore
-      popularity_greater: $minPopularity
-      sort: [TRENDING_DESC, POPULARITY_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-  popular: Page(page: 1, perPage: 20) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      averageScore_greater: $minScore
-      popularity_greater: $minPopularity
-      sort: [POPULARITY_DESC, SCORE_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-  topRated: Page(page: 1, perPage: 20) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      averageScore_greater: $minScore
-      popularity_greater: $minPopularity
-      sort: [SCORE_DESC, POPULARITY_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-}
-`;
-
-const FINAL_CANDIDATE_QUERY = `
-query ($genreIn: [String], $tagIn: [String], $excludeIds: [Int], $page: Int, $perPage: Int, $minimumTagRank: Int) {
-  Page(page: $page, perPage: $perPage) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      tag_in: $tagIn
-      minimumTagRank: $minimumTagRank
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      sort: [POPULARITY_DESC, SCORE_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-}
-`;
-
-const FINAL_CANDIDATE_EXPLORE_QUERY = `
-query ($genreIn: [String], $excludeIds: [Int], $page: Int, $perPage: Int) {
-  trending: Page(page: $page, perPage: $perPage) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      averageScore_greater: 58
-      popularity_greater: 1500
-      sort: [TRENDING_DESC, POPULARITY_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-  highScore: Page(page: $page, perPage: $perPage) {
-    media(
-      type: ANIME
-      status_not_in: [NOT_YET_RELEASED]
-      isAdult: false
-      genre_in: $genreIn
-      id_not_in: $excludeIds
-      format_in: [TV, OVA, ONA, TV_SHORT]
-      averageScore_greater: 72
-      popularity_greater: 1200
-      sort: [SCORE_DESC, POPULARITY_DESC]
-    ) {
-      id
-      idMal
-      format
-      title { romaji english native }
-      synonyms
-      description(asHtml: false)
-      coverImage { medium large }
-      genres
-      tags { name rank }
-      meanScore
-      popularity
-      seasonYear
-    }
-  }
-}
-`;
-
-const RECOMMENDATION_QUERY = `
-query ($id: Int) {
-  Media(id: $id, type: ANIME) {
-    recommendations(sort: [RATING_DESC], perPage: 25) {
-      nodes {
-        rating
-        mediaRecommendation {
-          id
-          idMal
-          format
-          title { romaji english native }
-          synonyms
-          description(asHtml: false)
-          coverImage { medium large }
-          genres
-          tags { name rank }
-          meanScore
-          popularity
-          seasonYear
-        }
-      }
-    }
-  }
-}
-`;
-
-const ANILIST_ENDPOINT = "https://graphql.anilist.co";
 const ANILIST_MAX_RETRIES = 3;
 const ANILIST_BASE_RETRY_MS = 700;
 const ANILIST_REQUEST_GAP_MS = 120;
 const ANILIST_MAX_CONCURRENT = 3;
-const CATEGORY_MIN_SCORE = 62;
-const CATEGORY_MIN_POPULARITY = 8000;
 const STEP2_MAX_PICKS = 12;
 const STEP2_MIN_PICKS_FOR_FINAL = 3;
 
@@ -679,20 +396,11 @@ function dedupeByFranchise(animes: Anime[]): Anime[] {
       map.set(key, anime);
       continue;
     }
-    const currentScore = (current.popularity ?? 0) + (current.meanScore ?? 0) * 100;
-    const nextScore = (anime.popularity ?? 0) + (anime.meanScore ?? 0) * 100;
+    const currentScore = (current.popularity ?? 0) + getScoreValue(current) * 100;
+    const nextScore = (anime.popularity ?? 0) + getScoreValue(anime) * 100;
     if (nextScore > currentScore) map.set(key, anime);
   }
   return Array.from(map.values());
-}
-
-function shuffleArray<T>(items: T[]): T[] {
-  const cloned = [...items];
-  for (let i = cloned.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [cloned[i], cloned[j]] = [cloned[j], cloned[i]];
-  }
-  return cloned;
 }
 
 function getTitle(anime: Anime, koTitleCache: Record<string, string>): string {
@@ -739,223 +447,10 @@ function toKoreanGenre(genre: string): string {
 
 function buildKoreanSummary(anime: Anime): string {
   const genres = (anime.genres ?? []).slice(0, 3).map(toKoreanGenre);
-  const score = anime.meanScore ?? "-";
+  const score = getScoreValue(anime) || "-";
   const year = anime.seasonYear ? `${anime.seasonYear}년작` : "연도 정보 없음";
   if (!genres.length) return `평균 평점 ${score} · ${year}`;
   return `장르: ${genres.join(", ")} · 평균 평점 ${score} · ${year}`;
-}
-
-function collectCategoryBuckets(payload: CategoryBucketPayload): Anime[] {
-  const merged = [
-    ...(payload.trending?.media ?? []),
-    ...(payload.popular?.media ?? []),
-    ...(payload.topRated?.media ?? []),
-  ];
-  return dedupeByFranchise(merged);
-}
-
-const ACTION_THEME_TAG_REGEX =
-  /(battle|fight|war|military|martial|super power|mecha|assassin|weapon|revenge|survival|monster)/i;
-const ROMANCE_THEME_TAG_REGEX =
-  /(romance|love|relationship|dating|kiss|marriage|newlyweds|romantic|romcom|shoujo|josei|love triangle)/i;
-const HEALING_THEME_TAG_REGEX =
-  /(iyashikei|healing|wholesome|daily life|slow life|friendship|family life|cute girls doing cute things|food|cooking|gourmet|slice of life)/i;
-const PSYCHOLOGICAL_THEME_TAG_REGEX =
-  /(mind game|psychological|manipulation|suspense|mystery|detective|crime|strategy|trauma|existential|philosophy|thriller|gambling)/i;
-const INTENSE_THEME_TAG_REGEX = /(gore|slasher|death game|revenge|assassin|war|military|battle royale|survival)/i;
-
-function getAnimeGenresLower(anime: Anime): Set<string> {
-  return new Set((anime.genres ?? []).map((genre) => genre.toLowerCase()));
-}
-
-function getAnimeTagsLower(anime: Anime): string[] {
-  return (anime.tags ?? []).map((tag) => (tag.name ?? "").toLowerCase()).filter(Boolean);
-}
-
-function hasGenre(genres: Set<string>, target: string): boolean {
-  return genres.has(target.toLowerCase());
-}
-
-function hasTag(tags: string[], regex: RegExp): boolean {
-  return tags.some((tag) => regex.test(tag));
-}
-
-function isCategoryAligned(categoryId: string, anime: Anime): boolean {
-  const genres = getAnimeGenresLower(anime);
-  const tags = getAnimeTagsLower(anime);
-
-  switch (categoryId) {
-    case "action": {
-      return hasGenre(genres, "Action") || hasGenre(genres, "Adventure") || hasTag(tags, ACTION_THEME_TAG_REGEX);
-    }
-    case "romance": {
-      const romanceCore = hasGenre(genres, "Romance") || hasTag(tags, ROMANCE_THEME_TAG_REGEX);
-      if (!romanceCore) return false;
-
-      const actionHeavy =
-        hasGenre(genres, "Action") ||
-        hasGenre(genres, "Adventure") ||
-        hasGenre(genres, "Mecha") ||
-        hasTag(tags, ACTION_THEME_TAG_REGEX);
-      const romanceStrength =
-        Number(hasGenre(genres, "Romance")) * 2 +
-        Number(hasTag(tags, ROMANCE_THEME_TAG_REGEX)) * 2 +
-        Number(hasGenre(genres, "Comedy")) +
-        Number(hasGenre(genres, "Drama"));
-
-      if (actionHeavy && romanceStrength < 4) return false;
-      return true;
-    }
-    case "healing": {
-      const healingCore = hasGenre(genres, "Slice of Life") || hasTag(tags, HEALING_THEME_TAG_REGEX);
-      if (!healingCore) return false;
-
-      const intenseTheme =
-        hasGenre(genres, "Action") ||
-        hasGenre(genres, "Adventure") ||
-        hasGenre(genres, "Horror") ||
-        hasGenre(genres, "Thriller") ||
-        hasTag(tags, ACTION_THEME_TAG_REGEX) ||
-        hasTag(tags, INTENSE_THEME_TAG_REGEX);
-      const strongHealingSignal =
-        hasGenre(genres, "Slice of Life") || hasTag(tags, /(iyashikei|healing|wholesome|slow life)/i);
-
-      if (intenseTheme && !strongHealingSignal) return false;
-      return true;
-    }
-    case "psychological": {
-      const psychologicalCore =
-        hasGenre(genres, "Psychological") ||
-        hasGenre(genres, "Mystery") ||
-        hasGenre(genres, "Thriller") ||
-        hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
-      if (!psychologicalCore) return false;
-
-      const pureActionFantasy =
-        (hasGenre(genres, "Action") || hasGenre(genres, "Adventure") || hasGenre(genres, "Fantasy")) &&
-        !hasGenre(genres, "Psychological") &&
-        !hasGenre(genres, "Mystery") &&
-        !hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
-
-      if (pureActionFantasy) return false;
-      return true;
-    }
-    case "special": {
-      return isSpecialThemeAnime(anime);
-    }
-    default:
-      return true;
-  }
-}
-
-function filterByCategory(categoryId: string, animes: Anime[]): Anime[] {
-  return animes.filter((anime) => isCategoryAligned(categoryId, anime));
-}
-
-function isSpecialThemeAnime(anime: Anime): boolean {
-  const genres = new Set((anime.genres ?? []).map((g) => g.toLowerCase()));
-  const tags = (anime.tags ?? []).map((t) => (t.name ?? "").toLowerCase()).filter(Boolean);
-
-  const themeTagRegex =
-    /(idol|music|band|singer|concert|showbiz|cooking|food|gourmet|restaurant|cafe|chef|workplace|office|job|profession|career|teacher|doctor|nurse|bartender|maid|sports|basketball|baseball|soccer|volleyball|swimming|athlete)/i;
-
-  const strongThemeTagHits = tags.filter((tag) => themeTagRegex.test(tag)).length;
-  const themeGenreHit = genres.has("music") || genres.has("sports");
-  const actionGenreHits = Number(genres.has("action")) + Number(genres.has("adventure")) + Number(genres.has("fantasy"));
-  const actionTagHits = tags.filter((tag) => ACTION_THEME_TAG_REGEX.test(tag)).length;
-
-  const themeStrength = strongThemeTagHits * 2 + (themeGenreHit ? 2 : 0);
-  const actionStrength = actionGenreHits + actionTagHits * 1.6;
-
-  if (themeStrength <= 0) return false;
-  if (actionStrength >= 3.4 && themeStrength < actionStrength) return false;
-  return true;
-}
-
-function getSubcategoryIdForAnime(categoryId: string, anime: Anime): string {
-  const rules = SUBCATEGORY_RULES[categoryId] ?? [];
-  for (const rule of rules) {
-    if (rule.match(anime)) return rule.id;
-  }
-  return "other";
-}
-
-function distributeBySubcategory(categoryId: string, pool: Anime[], total = 20): Anime[] {
-  const isSpecialCategory = categoryId === "special";
-  const grouped = new Map<string, Anime[]>();
-
-  for (const anime of pool) {
-    const subId = getSubcategoryIdForAnime(categoryId, anime);
-    if (!grouped.has(subId)) {
-      grouped.set(subId, []);
-    }
-    grouped.get(subId)!.push(anime);
-  }
-
-  const groups = Array.from(grouped.entries())
-    .map(([subId, items]) => ({
-      subId,
-      items: [...items].sort(
-        (a, b) =>
-          (b.popularity ?? 0) + (b.meanScore ?? 0) * 200 - ((a.popularity ?? 0) + (a.meanScore ?? 0) * 200),
-      ),
-      groupPopularity: items.reduce((acc, cur) => acc + (cur.popularity ?? 0), 0),
-    }))
-    .sort((a, b) => {
-      if (isSpecialCategory && a.subId === "other" && b.subId !== "other") return 1;
-      if (isSpecialCategory && b.subId === "other" && a.subId !== "other") return -1;
-      return b.groupPopularity - a.groupPopularity || b.items.length - a.items.length;
-    });
-
-  const popularGroups = groups.slice(0, Math.min(5, groups.length));
-  const lessPopularGroups = groups.slice(popularGroups.length);
-  const selected: Anime[] = [];
-
-  // Popular subcategories: prioritize 4 each (up to 5 groups => about 20 cards).
-  for (const group of popularGroups) {
-    const pickLimit = isSpecialCategory && group.subId === "other" ? 1 : 4;
-    selected.push(...group.items.slice(0, pickLimit));
-  }
-
-  // Less-popular subcategories: keep 1 each if space remains.
-  if (selected.length < total) {
-    for (const group of lessPopularGroups) {
-      if (!group.items.length) continue;
-      if (isSpecialCategory && group.subId === "other") continue;
-      selected.push(group.items[0]);
-      if (selected.length >= total) break;
-    }
-  }
-
-  if (selected.length < total) {
-    const selectedIds = new Set(selected.map((item) => item.id));
-    for (const group of popularGroups) {
-      for (const item of group.items.slice(4)) {
-        if (selectedIds.has(item.id)) continue;
-        selected.push(item);
-        selectedIds.add(item.id);
-        if (selected.length >= total) break;
-      }
-      if (selected.length >= total) break;
-    }
-  }
-
-  return selected.slice(0, total);
-}
-
-function extractTopTags(seeds: Anime[], limit = 8): string[] {
-  const tagMap = new Map<string, number>();
-  seeds.forEach((seed) => {
-    (seed.tags ?? []).forEach((tag) => {
-      if (!tag.name) return;
-      const weight = Math.max(10, tag.rank ?? 30);
-      tagMap.set(tag.name, (tagMap.get(tag.name) ?? 0) + weight);
-    });
-  });
-  return Array.from(tagMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([name]) => name);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1066,156 +561,104 @@ async function aniFetch<T>(
   }
 }
 
-function buildSeedProfile(seeds: Anime[]): SeedProfile {
-  const weightedGenre = new Map<string, number>();
-  const weightedTag = new Map<string, number>();
-  const genreCount = new Map<string, number>();
-  const tagCount = new Map<string, number>();
-  const recentGenres = new Set<string>();
-  const recentTags = new Set<string>();
-  const total = Math.max(1, seeds.length - 1);
-
-  seeds.forEach((seed, index) => {
-    // Later selections receive stronger signal because they are usually more refined.
-    const recencyWeight = 1 + (index / total) * 0.75;
-    for (const genre of seed.genres ?? []) {
-      weightedGenre.set(genre, (weightedGenre.get(genre) ?? 0) + recencyWeight);
-      genreCount.set(genre, (genreCount.get(genre) ?? 0) + 1);
-    }
-    for (const tag of seed.tags ?? []) {
-      if (!tag.name) continue;
-      const baseTagWeight = Math.max(0.25, (tag.rank ?? 40) / 100);
-      weightedTag.set(tag.name, (weightedTag.get(tag.name) ?? 0) + baseTagWeight * recencyWeight * 1.2);
-      tagCount.set(tag.name, (tagCount.get(tag.name) ?? 0) + 1);
-    }
-  });
-
-  for (const seed of seeds.slice(-4)) {
-    for (const genre of seed.genres ?? []) recentGenres.add(genre);
-    for (const tag of seed.tags ?? []) {
-      if (tag.name) recentTags.add(tag.name);
-    }
-  }
-
-  const strongGenres = new Set(
-    [...genreCount.entries()]
-      .filter(([genre, count]) => count >= 2 || (weightedGenre.get(genre) ?? 0) >= 2.4)
-      .map(([genre]) => genre),
-  );
-  const strongTags = new Set(
-    [...tagCount.entries()]
-      .filter(([tag, count]) => count >= 2 || (weightedTag.get(tag) ?? 0) >= 2.1)
-      .map(([tag]) => tag),
-  );
-
-  return { weightedGenre, weightedTag, strongGenres, strongTags, recentGenres, recentTags };
-}
-
-function scoreCandidateDetailed(
-  candidate: Anime,
-  profile: SeedProfile,
-  graphSignal = 0,
-): CandidateScoreDetail {
-  const matchedGenres = (candidate.genres ?? []).filter((genre) => profile.weightedGenre.has(genre));
-  const matchedStrongGenres = (candidate.genres ?? []).filter((genre) => profile.strongGenres.has(genre));
-  const matchedStrongTags = (candidate.tags ?? [])
-    .map((tag) => tag.name)
-    .filter((tag): tag is string => typeof tag === "string" && profile.strongTags.has(tag));
-
-  const genreScore = (candidate.genres ?? []).reduce(
-    (acc, genre) => acc + (profile.weightedGenre.get(genre) ?? 0) * 7.2,
-    0,
-  );
-  const tagScore = (candidate.tags ?? []).reduce((acc, tag) => {
-    if (!tag.name) return acc;
-    return acc + (profile.weightedTag.get(tag.name) ?? 0) * 5.8;
-  }, 0);
-
-  const strongBoost = matchedStrongGenres.length * 3.6 + matchedStrongTags.length * 2.7;
-  const recencyBoost =
-    (candidate.genres ?? []).reduce((acc, genre) => acc + (profile.recentGenres.has(genre) ? 2.2 : 0), 0) +
-    (candidate.tags ?? []).reduce((acc, tag) => acc + (tag.name && profile.recentTags.has(tag.name) ? 1.2 : 0), 0);
-  const graphBoost = graphSignal;
-  const qualityBoost = ((candidate.meanScore ?? 65) - 60) * 0.5;
-  const popularityBoost = Math.min(14, Math.log10((candidate.popularity ?? 1) + 1) * 4.5);
-
-  const total =
-    genreScore + tagScore + strongBoost + recencyBoost + graphBoost + qualityBoost + popularityBoost;
-
-  return {
-    total,
-    genreScore,
-    tagScore,
-    strongBoost,
-    recencyBoost,
-    graphBoost,
-    qualityBoost,
-    popularityBoost,
-    matchedGenres,
-    matchedStrongGenres,
-    matchedStrongTags,
-  };
-}
-
-function buildReasonFromDetail(detail: CandidateScoreDetail): string {
-  if (detail.strongBoost >= 6 && detail.matchedStrongGenres.length) {
-    return `선택 빈도가 높았던 선호 장르(${detail.matchedStrongGenres
-      .slice(0, 2)
-      .map(toKoreanGenre)
-      .join(", ")})를 강하게 반영했습니다.`;
-  }
-  if (detail.recencyBoost >= 5) {
-    return "최근에 선택한 작품들과 결이 가장 가까운 흐름을 우선 반영했습니다.";
-  }
-  if (detail.graphBoost >= 8) {
-    return "선택작과 함께 추천되는 사용자 흐름 신호가 강해 우선 배치했습니다.";
-  }
-  if (detail.matchedGenres.length >= 2) {
-    return `선택작과 공통 장르(${detail.matchedGenres.slice(0, 2).map(toKoreanGenre).join(", ")}) 일치도가 높습니다.`;
-  }
-  if (detail.tagScore >= 6) {
-    return "반복 선택된 태그 성향과 유사도가 높아 추천했습니다.";
-  }
-  if (detail.qualityBoost + detail.popularityBoost >= 10) {
-    return "완성도와 대중성 지표가 안정적으로 높아 추천했습니다.";
-  }
-  return "선택한 작품군과의 장르·태그 유사도를 종합해 추천했습니다.";
-}
-
-function reasonBucket(detail: CandidateScoreDetail): string {
-  if (detail.strongBoost >= 6 && detail.matchedStrongGenres.length) return "strong";
-  if (detail.recencyBoost >= 5) return "recency";
-  if (detail.graphBoost >= 8) return "graph";
-  if (detail.matchedGenres.length >= 2) return "genre";
-  if (detail.tagScore >= 6) return "tag";
-  if (detail.qualityBoost + detail.popularityBoost >= 10) return "quality";
-  return "general";
-}
-
 export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(CATEGORIES[0].id);
   const [activeStep, setActiveStep] = useState<1 | 2>(1);
   const [seenCategoryIds, setSeenCategoryIds] = useState<number[]>([]);
+  const [shownStep2MediaIds, setShownStep2MediaIds] = useState<number[]>([]);
 
   const [categoryAnimes, setCategoryAnimes] = useState<Anime[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(false);
   const [categoryError, setCategoryError] = useState("");
 
   const [pickedBaseAnimes, setPickedBaseAnimes] = useState<Anime[]>([]);
+  const [dislikedBaseAnimeIds, setDislikedBaseAnimeIds] = useState<number[]>([]);
 
   const [finalRecs, setFinalRecs] = useState<FinalRecommendation[]>([]);
   const [finalLoading, setFinalLoading] = useState(false);
   const [finalError, setFinalError] = useState("");
+  const [userProfile, setUserProfile] = useState<UserProfile>(createEmptyUserProfile());
 
   const [koTitleCache, setKoTitleCache] = useState<Record<string, string>>({});
   const lookupInFlight = useRef<Set<string>>(new Set());
   const lookupFailed = useRef<Set<string>>(new Set());
   const missingTitleMapRef = useRef<Record<string, MissingTitleRecord>>({});
+  const shownStep2MediaIdsRef = useRef<number[]>([]);
+  const userProfileRef = useRef<UserProfile>(createEmptyUserProfile());
+  const anonUserIdRef = useRef<string>("");
+  const sessionIdRef = useRef<string>("");
 
   const selectedCategory = useMemo(
     () => CATEGORIES.find((c) => c.id === selectedCategoryId) ?? CATEGORIES[0],
     [selectedCategoryId],
   );
+
+  useEffect(() => {
+    shownStep2MediaIdsRef.current = shownStep2MediaIds;
+  }, [shownStep2MediaIds]);
+
+  useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
+
+  useEffect(() => {
+    const anonUserId = getOrCreateAnonUserId();
+    const sessionId = createSessionId();
+    anonUserIdRef.current = anonUserId;
+    sessionIdRef.current = sessionId;
+
+    void ensureUserSession(anonUserId, sessionId, CATEGORIES[0].id).catch(() => {
+      // ignore firestore optional failure
+    });
+
+    void readUserProfile(anonUserId)
+      .then((profile) => {
+        const safe = profile ?? createEmptyUserProfile();
+        userProfileRef.current = safe;
+        setUserProfile(safe);
+      })
+      .catch(() => {
+        // ignore firestore optional failure
+      });
+  }, []);
+
+  useEffect(() => {
+    const anonUserId = anonUserIdRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!anonUserId || !sessionId) return;
+    void ensureUserSession(anonUserId, sessionId, selectedCategory.id).catch(() => {
+      // ignore firestore optional failure
+    });
+  }, [selectedCategory.id]);
+
+  function persistUserProfile(nextProfile: UserProfile): void {
+    userProfileRef.current = nextProfile;
+    setUserProfile(nextProfile);
+    const anonUserId = anonUserIdRef.current;
+    if (!anonUserId) return;
+    void writeUserProfile(anonUserId, nextProfile).catch(() => {
+      // ignore firestore optional failure
+    });
+  }
+
+  function appendStepSnapshot(
+    shownMediaIds: number[],
+    likedMediaIds: number[],
+    dislikedMediaIds: number[],
+  ): void {
+    const anonUserId = anonUserIdRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!anonUserId || !sessionId) return;
+    void appendSessionStep(anonUserId, sessionId, selectedCategory.id, {
+      stepIndex: 2,
+      shownMediaIds,
+      likedMediaIds,
+      dislikedMediaIds,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {
+      // ignore firestore optional failure
+    });
+  }
 
   function rememberMissingTitle(anime: Anime): void {
     const key = cacheKey(anime);
@@ -1270,84 +713,160 @@ export default function App() {
     }
   }, [koTitleCache]);
 
+  function recoDebugEnabled(): boolean {
+    const envDebug = ((import.meta.env.VITE_RECO_DEBUG as string | undefined) ?? "").trim().toLowerCase();
+    if (envDebug === "1" || envDebug === "true" || envDebug === "on") return true;
+    try {
+      return localStorage.getItem("voko_reco_debug") === "1";
+    } catch {
+      return false;
+    }
+  }
+
   async function fetchCategoryAnimes(category: Category, mode: "reset" | "refresh" = "reset") {
     setCategoryLoading(true);
     setCategoryError("");
     if (mode === "reset") {
       setCategoryAnimes([]);
       setPickedBaseAnimes([]);
+      setDislikedBaseAnimeIds([]);
       setFinalRecs([]);
       setFinalError("");
       setSeenCategoryIds([]);
+      setShownStep2MediaIds([]);
     }
 
     const baseSeen = mode === "reset" ? [] : seenCategoryIds;
-    const excludeIds = baseSeen.slice(-350);
-    const isSpecialCategory = category.id === "special";
-    const strictMinScore = isSpecialCategory ? 52 : CATEGORY_MIN_SCORE;
-    const strictMinPopularity = isSpecialCategory ? 1200 : CATEGORY_MIN_POPULARITY;
+    const excludeIds = baseSeen.slice(-500);
+    const excludeSet = new Set(excludeIds);
+    const debug = recoDebugEnabled();
 
     try {
-      const strictPayload = await aniFetch<CategoryBucketPayload>(CATEGORY_BUCKET_QUERY, {
-        genreIn: category.genres,
-        excludeIds,
-        minScore: strictMinScore,
-        minPopularity: strictMinPopularity,
-      });
-      const strictCandidates = filterByCategory(category.id, collectCategoryBuckets(strictPayload));
+      const presets = getCategoryDiscoveryPresets(category.id, category.genres);
+      const candidateById = new Map<number, Anime>();
 
-      let nextList = distributeBySubcategory(
-        category.id,
-        shuffleArray(strictCandidates),
-        20,
-      );
+      async function runDiscoveryPass(
+        minAverageScore: number,
+        minPopularity: number,
+        page: number,
+        perPage: number,
+      ): Promise<void> {
+        const plans = presets.flatMap((preset) =>
+          STEP2_DISCOVERY_SORTS.map((sort) => ({
+            genreIn: preset.genreIn.length ? preset.genreIn : category.genres,
+            tagIn: preset.tagIn && preset.tagIn.length ? preset.tagIn : undefined,
+            sort,
+            perPage: preset.perPage ?? perPage,
+            minAverageScore: preset.minAverageScore ?? minAverageScore,
+            minPopularity: preset.minPopularity ?? minPopularity,
+          })),
+        );
 
-      if (nextList.length < 18) {
-        const relaxedExclude = Array.from(new Set([...excludeIds, ...nextList.map((item) => item.id)])).slice(-350);
-        const relaxedPayload = await aniFetch<CategoryBucketPayload>(CATEGORY_BUCKET_QUERY, {
-          genreIn: category.genres,
-          excludeIds: relaxedExclude,
-          minScore: 0,
-          minPopularity: 0,
+        const responses = await Promise.all(
+          plans.map((plan) =>
+            aniFetch<DiscoveryPayload>(
+              DISCOVERY_MEDIA_QUERY,
+              {
+                genreIn: plan.genreIn,
+                tagIn: plan.tagIn,
+                sort: [plan.sort],
+                page,
+                perPage: plan.perPage,
+                excludeIds,
+                minAverageScore: plan.minAverageScore,
+                minPopularity: plan.minPopularity,
+              },
+              { retries: 2 },
+            ),
+          ),
+        );
+
+        responses.forEach((response, index) => {
+          const plan = plans[index];
+          const media = filterByCategory(category.id, response.Page?.media ?? []);
+          media.forEach((anime) => {
+            if (excludeSet.has(anime.id)) return;
+            if ((anime.popularity ?? 0) < plan.minPopularity) return;
+            if (getScoreValue(anime) < plan.minAverageScore) return;
+
+            const prev = candidateById.get(anime.id);
+            if (!prev) {
+              candidateById.set(anime.id, anime);
+            } else {
+              const prevComposite = (prev.popularity ?? 0) + getScoreValue(prev) * 100;
+              const nextComposite = (anime.popularity ?? 0) + getScoreValue(anime) * 100;
+              if (nextComposite > prevComposite) candidateById.set(anime.id, anime);
+            }
+          });
         });
-        const relaxedCandidates = filterByCategory(category.id, collectCategoryBuckets(relaxedPayload));
-        nextList = distributeBySubcategory(
-          category.id,
-          shuffleArray(dedupeByFranchise([...nextList, ...relaxedCandidates])),
-          20,
-        );
       }
 
-      if (isSpecialCategory && nextList.length < 18) {
-        const specialExploreVariables: Record<string, unknown> = {
-          genreIn: category.genres,
-          page: 1,
-          perPage: 90,
-          excludeIds: Array.from(new Set([...excludeIds, ...nextList.map((item) => item.id)])).slice(-350),
-        };
-        const explorePayload = await aniFetch<CandidateExplorePayload>(
-          FINAL_CANDIDATE_EXPLORE_QUERY,
-          specialExploreVariables,
-          { retries: 2 },
-        );
-        const exploreCandidates = filterByCategory(category.id, dedupeByFranchise([
-          ...(explorePayload.trending?.media ?? []),
-          ...(explorePayload.highScore?.media ?? []),
-        ]));
-        nextList = distributeBySubcategory(
-          category.id,
-          shuffleArray(dedupeByFranchise([...nextList, ...exploreCandidates])),
-          20,
-        );
+      await runDiscoveryPass(STEP2_MIN_AVERAGE_SCORE, STEP2_MIN_POPULARITY, 1, 24);
+      let candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
+
+      if (candidatePool.length < STEP2_POOL_MIN) {
+        await runDiscoveryPass(STEP2_RELAXED_MIN_AVERAGE_SCORE, STEP2_RELAXED_MIN_POPULARITY, 2, 24);
+        candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
       }
 
-      if (!nextList.length) setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
+      candidatePool = candidatePool
+        .sort((a, b) => {
+          const bScore = (b.popularity ?? 0) + getScoreValue(b) * 120 + Math.max(0, b.trending ?? 0) * 0.1;
+          const aScore = (a.popularity ?? 0) + getScoreValue(a) * 120 + Math.max(0, a.trending ?? 0) * 0.1;
+          return bScore - aScore;
+        })
+        .slice(0, STEP2_POOL_MAX);
 
-      setCategoryAnimes(nextList);
+      if (!candidatePool.length) {
+        setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
+        setCategoryAnimes([]);
+        return;
+      }
+
+      const selection = selectStep2DiverseCandidates(candidatePool, {
+        total: STEP2_TARGET_COUNT,
+        getFranchiseKey: franchiseKey,
+        exposureHistory: userProfileRef.current.exposureHistory,
+      });
+      const nextList = selection.selected;
+
+      if (debug) {
+        console.groupCollapsed(`[RECO][STEP2] ${category.id} selected=${nextList.length} pool=${selection.poolSize}`);
+        console.log("yearTargets", selection.yearTargets, "formatTargets", selection.formatTargets);
+        console.table(
+          selection.debugRows.slice(0, 50).map((row, index) => ({
+            rank: index + 1,
+            id: row.animeId,
+            title: row.title,
+            score: Number(row.score.toFixed(3)),
+            quality: Number(row.quality.toFixed(3)),
+            diversityGain: Number(row.diversityGain.toFixed(3)),
+            redundancy: Number(row.redundancyPenalty.toFixed(3)),
+            exposurePenalty: Number(row.exposurePenalty.toFixed(3)),
+            year: row.year ?? "-",
+            format: row.format ?? "-",
+            yearBucket: row.yearBucket,
+            topTags: row.topTags.join(", "),
+            studios: row.studios.join(", "),
+          })),
+        );
+        console.groupEnd();
+      }
+
+      const nextShownIds = nextList.slice(0, STEP2_TARGET_COUNT).map((anime) => anime.id);
+      const nextLikedIds = mode === "reset" ? [] : pickedBaseAnimes.map((anime) => anime.id);
+      const nextDislikedIds = mode === "reset" ? [] : dislikedBaseAnimeIds;
+
+      setCategoryAnimes(nextList.slice(0, STEP2_TARGET_COUNT));
+      setShownStep2MediaIds(nextShownIds);
       setSeenCategoryIds((prev) => {
         const base = mode === "reset" ? [] : prev;
-        return Array.from(new Set([...base, ...nextList.map((a) => a.id)]));
+        return Array.from(new Set([...base, ...nextList.map((a) => a.id)])).slice(-500);
       });
+
+      const profileAfterExposure = updateExposureHistory(userProfileRef.current, nextShownIds);
+      persistUserProfile(profileAfterExposure);
+      appendStepSnapshot(nextShownIds, nextLikedIds, nextDislikedIds);
     } catch (error) {
       setCategoryError(error instanceof Error ? error.message : "목록을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -1356,15 +875,39 @@ export default function App() {
   }
 
   function toggleBasePick(anime: Anime) {
-    setPickedBaseAnimes((prev) => {
-      const exists = prev.some((item) => item.id === anime.id);
-      if (exists) {
-        return prev.filter((item) => item.id !== anime.id);
-      }
-      if (prev.length >= STEP2_MAX_PICKS) return prev;
-      return [...prev, anime];
-    });
+    const exists = pickedBaseAnimes.some((item) => item.id === anime.id);
+    let nextPicked = pickedBaseAnimes;
+    let nextDisliked = dislikedBaseAnimeIds;
+    let feedback: FeedbackSignal;
+
+    if (exists) {
+      nextPicked = pickedBaseAnimes.filter((item) => item.id !== anime.id);
+      nextDisliked = Array.from(new Set([...dislikedBaseAnimeIds, anime.id])).slice(-PROFILE_EXPOSURE_LIMIT);
+      feedback = "dislike";
+    } else {
+      if (pickedBaseAnimes.length >= STEP2_MAX_PICKS) return;
+      nextPicked = [...pickedBaseAnimes, anime];
+      nextDisliked = dislikedBaseAnimeIds.filter((id) => id !== anime.id);
+      feedback = "like";
+    }
+
+    setPickedBaseAnimes(nextPicked);
+    setDislikedBaseAnimeIds(nextDisliked);
     setFinalRecs([]);
+    setFinalError("");
+
+    const nextProfile = updateProfileFromFeedback(userProfileRef.current, anime, feedback);
+    persistUserProfile(nextProfile);
+    appendStepSnapshot(shownStep2MediaIdsRef.current, nextPicked.map((item) => item.id), nextDisliked);
+
+    if (recoDebugEnabled()) {
+      console.debug("[RECO][PROFILE][FEEDBACK]", {
+        mediaId: anime.id,
+        feedback,
+        likedTopTags: topLikedTags(nextProfile, 6),
+        dislikedTopTags: topDislikedTags(nextProfile, 6),
+      });
+    }
   }
 
   async function makeFinalRecommendations() {
@@ -1377,20 +920,30 @@ export default function App() {
     setFinalError("");
 
     try {
+      const debug = recoDebugEnabled();
       const allowedFormats = new Set(["TV", "OVA", "ONA", "TV_SHORT"]);
-      const seedProfile = buildSeedProfile(pickedBaseAnimes);
-      const topTags = [...seedProfile.weightedTag.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([tag]) => tag);
+      const seedPreference = buildSeedPreferenceVector(pickedBaseAnimes);
       const seedSet = new Set(pickedBaseAnimes.map((item) => item.id));
       const seedIds = Array.from(seedSet);
+      const rawQueryTagWeight = new Map<string, number>();
+      pickedBaseAnimes.forEach((seed, index) => {
+        const recencyWeight = 1 + index / Math.max(1, pickedBaseAnimes.length - 1);
+        (seed.tags ?? []).forEach((tag) => {
+          const tagName = tag.name?.trim();
+          if (!tagName) return;
+          const weighted = Math.max(1, (tag.rank ?? 30) / 10) * recencyWeight;
+          rawQueryTagWeight.set(tagName, (rawQueryTagWeight.get(tagName) ?? 0) + weighted);
+        });
+      });
+      const topTagsForQuery = [...rawQueryTagWeight.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([name]) => name);
 
-      const graphScoreById = new Map<number, number>();
       const graphCandidates = new Map<number, Anime>();
 
       const graphResponses = await Promise.all(
-        seedIds.slice(0, 6).map((id) =>
+        seedIds.slice(0, 8).map((id) =>
           aniFetch<RecommendationPayload>(RECOMMENDATION_QUERY, { id }, { retries: 2 }),
         ),
       );
@@ -1401,85 +954,172 @@ export default function App() {
           if (!candidate || seedSet.has(candidate.id)) return;
           if (candidate.format && !allowedFormats.has(candidate.format)) return;
           if (!isCategoryAligned(selectedCategory.id, candidate)) return;
-
-          const rawSignal = Math.max(0, node.rating ?? 0);
-          const normalizedGraphSignal = Math.log10(rawSignal + 1) * 12;
-
-          graphScoreById.set(candidate.id, (graphScoreById.get(candidate.id) ?? 0) + normalizedGraphSignal);
           if (!graphCandidates.has(candidate.id)) graphCandidates.set(candidate.id, candidate);
         });
       });
 
-      const finalVariables: Record<string, unknown> = {
-        genreIn: selectedCategory.genres,
-        page: 1,
-        perPage: 80,
-        excludeIds: seedIds,
-      };
-      if (topTags.length) {
-        finalVariables.tagIn = topTags;
-        finalVariables.minimumTagRank = 35;
-      }
+      const presets = getCategoryDiscoveryPresets(selectedCategory.id, selectedCategory.genres).slice(0, 5);
+      const discoverPlans = [
+        ...STEP2_DISCOVERY_SORTS.map((sort) => ({
+          genreIn: selectedCategory.genres,
+          tagIn: topTagsForQuery.slice(0, 10),
+          sort,
+          page: 1,
+          perPage: 80,
+          minAverageScore: STEP2_RELAXED_MIN_AVERAGE_SCORE,
+          minPopularity: STEP2_RELAXED_MIN_POPULARITY,
+        })),
+        ...presets.map((preset) => ({
+          genreIn: preset.genreIn.length ? preset.genreIn : selectedCategory.genres,
+          tagIn: preset.tagIn?.length ? preset.tagIn : topTagsForQuery.slice(0, 6),
+          sort: "POPULARITY_DESC" as const,
+          page: 1,
+          perPage: 48,
+          minAverageScore: STEP2_RELAXED_MIN_AVERAGE_SCORE,
+          minPopularity: STEP2_RELAXED_MIN_POPULARITY,
+        })),
+        {
+          genreIn: selectedCategory.genres,
+          tagIn: topTagsForQuery.slice(0, 8),
+          sort: "TRENDING_DESC" as const,
+          page: 2,
+          perPage: 60,
+          minAverageScore: STEP2_RELAXED_MIN_AVERAGE_SCORE,
+          minPopularity: STEP2_RELAXED_MIN_POPULARITY,
+        },
+      ];
 
-      const exploreVariables: Record<string, unknown> = {
-        genreIn: selectedCategory.genres,
-        page: 1,
-        perPage: 60,
-        excludeIds: seedIds,
-      };
+      const discoverResponses = await Promise.all(
+        discoverPlans.map((plan) =>
+          aniFetch<DiscoveryPayload>(
+            DISCOVERY_MEDIA_QUERY,
+            {
+              genreIn: plan.genreIn,
+              tagIn: plan.tagIn.length ? plan.tagIn : undefined,
+              sort: [plan.sort],
+              page: plan.page,
+              perPage: plan.perPage,
+              excludeIds: seedIds,
+              minAverageScore: plan.minAverageScore,
+              minPopularity: plan.minPopularity,
+            },
+            { retries: 2 },
+          ),
+        ),
+      );
 
-      const [fallbackData, exploreData] = await Promise.all([
-        aniFetch<{ Page: { media: Anime[] } }>(FINAL_CANDIDATE_QUERY, finalVariables),
-        aniFetch<CandidateExplorePayload>(FINAL_CANDIDATE_EXPLORE_QUERY, exploreVariables, { retries: 2 }),
-      ]);
       const mergedCandidates = new Map<number, Anime>();
       graphCandidates.forEach((anime) => mergedCandidates.set(anime.id, anime));
-      dedupeByFranchise(fallbackData.Page.media ?? [])
-        .filter((anime) => !seedSet.has(anime.id))
-        .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
-        .forEach((anime) => {
-          if (!mergedCandidates.has(anime.id)) mergedCandidates.set(anime.id, anime);
-        });
-      dedupeByFranchise([
-        ...(exploreData.trending?.media ?? []),
-        ...(exploreData.highScore?.media ?? []),
-      ])
-        .filter((anime) => !seedSet.has(anime.id))
-        .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
-        .forEach((anime) => {
-          if (!mergedCandidates.has(anime.id)) mergedCandidates.set(anime.id, anime);
-        });
+      discoverResponses.forEach((response) => {
+        (response.Page?.media ?? []).forEach((anime) => {
+          if (seedSet.has(anime.id)) return;
+          if (anime.format && !allowedFormats.has(anime.format)) return;
+          if (!isCategoryAligned(selectedCategory.id, anime)) return;
+          if ((anime.popularity ?? 0) < STEP2_RELAXED_MIN_POPULARITY) return;
+          if (getScoreValue(anime) < STEP2_RELAXED_MIN_AVERAGE_SCORE) return;
 
-      const ranked = dedupeByFranchise(Array.from(mergedCandidates.values()))
+          const prev = mergedCandidates.get(anime.id);
+          if (!prev) {
+            mergedCandidates.set(anime.id, anime);
+          } else {
+            const prevComposite = (prev.popularity ?? 0) + getScoreValue(prev) * 100;
+            const nextComposite = (anime.popularity ?? 0) + getScoreValue(anime) * 100;
+            if (nextComposite > prevComposite) mergedCandidates.set(anime.id, anime);
+          }
+        });
+      });
+
+      const candidatePool = dedupeByFranchise(Array.from(mergedCandidates.values()))
         .filter((anime) => !seedSet.has(anime.id))
         .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
+        .slice(0, STEP2_POOL_MAX);
+
+      const profileForScore = userProfileRef.current;
+      const scored = candidatePool
         .map((anime) => {
-          const detail = scoreCandidateDetailed(anime, seedProfile, graphScoreById.get(anime.id) ?? 0);
-          return {
+          const { breakdown, tagVector } = scoreFinalCandidate(anime, seedPreference);
+          const profileScore = scoreWithProfile(anime, profileForScore);
+          const total = Math.max(0, Math.min(1, breakdown.total + profileScore.total));
+          const candidate = {
             anime,
-            score: detail.total,
-            reason: buildReasonFromDetail(detail),
-            reasonType: reasonBucket(detail),
+            tagVector,
+            dominantTags: dominantTagNames(anime, 4),
+            breakdown: {
+              ...breakdown,
+              profileBonus: profileScore.total,
+              total,
+            },
+            reason: "",
           };
+          candidate.reason = buildFinalReason(candidate);
+          if (profileScore.total >= 0.05 && profileScore.matchedLikedTags.length) {
+            candidate.reason = `${candidate.reason} 프로필 선호 태그(${profileScore.matchedLikedTags.slice(0, 2).join(", ")})도 반영했습니다.`;
+          } else if (profileScore.total <= -0.05 && profileScore.matchedDislikedTags.length) {
+            candidate.reason = `${candidate.reason} 비선호 태그(${profileScore.matchedDislikedTags.slice(0, 2).join(", ")}) 중복을 낮췄습니다.`;
+          }
+          return candidate;
         })
-        .sort((a, b) => b.score - a.score);
+        .sort((a, b) => b.breakdown.total - a.breakdown.total);
 
-      const selected: Array<{ anime: Anime; score: number; reason: string; reasonType: string }> = [];
-      const usedReasonTypes = new Set<string>();
-
-      for (const item of ranked) {
-        if (selected.length >= 4) break;
-        if (usedReasonTypes.has(item.reasonType)) continue;
-        selected.push(item);
-        usedReasonTypes.add(item.reasonType);
-      }
-      for (const item of ranked) {
-        if (selected.length >= 4) break;
-        if (selected.some((picked) => picked.anime.id === item.anime.id)) continue;
-        selected.push(item);
+      if (!scored.length) {
+        setFinalError("추천 후보를 충분히 찾지 못했습니다. 다른 작품 조합으로 다시 시도해 주세요.");
+        setFinalRecs([]);
+        return;
       }
 
-      setFinalRecs(selected.slice(0, 4).map(({ anime, score, reason }) => ({ anime, score, reason })));
+      const mmrResult = selectFinalWithMMR(scored, {
+        getFranchiseKey: franchiseKey,
+        topN: FINAL_MMR_TOP_N,
+      });
+
+      const selected = [...mmrResult.selected.slice(0, 4)];
+      if (selected.length < 4) {
+        const usedIds = new Set(selected.map((item) => item.anime.id));
+        const usedFranchises = new Set(selected.map((item) => franchiseKey(item.anime)));
+        for (const candidate of scored) {
+          const franchise = franchiseKey(candidate.anime);
+          if (usedIds.has(candidate.anime.id) || usedFranchises.has(franchise)) continue;
+          selected.push(candidate);
+          usedIds.add(candidate.anime.id);
+          usedFranchises.add(franchise);
+          if (selected.length >= 4) break;
+        }
+      }
+
+      if (debug) {
+        console.groupCollapsed(`[RECO][FINAL] seeds=${pickedBaseAnimes.length} candidates=${scored.length}`);
+        console.log("queryTopTags", topTagsForQuery.slice(0, 12));
+        console.log("preferenceTopTags", topPreferenceTags(seedPreference, 10));
+        console.log("profileLikedTop", topLikedTags(profileForScore, 8));
+        console.log("profileDislikedTop", topDislikedTags(profileForScore, 8));
+        console.log("profileExposureCount", profileForScore.exposureHistory.length);
+        console.table(
+          mmrResult.debugRows.map((row, index) => ({
+            rank: index + 1,
+            id: row.animeId,
+            title: row.title,
+            base: Number((row.base * 100).toFixed(1)),
+            mmr: Number((row.mmr * 100).toFixed(1)),
+            sim: Number((row.similarity * 100).toFixed(1)),
+            quality: Number((row.quality * 100).toFixed(1)),
+            novelty: Number((row.novelty * 100).toFixed(1)),
+            profile: Number(((row.profileBonus ?? 0) * 100).toFixed(1)),
+            redundancy: Number((row.redundancy * 100).toFixed(1)),
+            year: row.year ?? "-",
+            format: row.format ?? "-",
+            tags: row.keyTags.join(", "),
+          })),
+        );
+        console.groupEnd();
+      }
+
+      setFinalRecs(
+        selected.map((item) => ({
+          anime: item.anime,
+          score: item.breakdown.total * 100,
+          reason: item.reason,
+        })),
+      );
     } catch (error) {
       setFinalError(error instanceof Error ? error.message : "추천 결과를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -1676,7 +1316,7 @@ export default function App() {
                     <h4>{getTitle(anime, koTitleCache)}</h4>
                     <p>{buildKoreanSummary(anime)}</p>
                     <div className="meta-row">
-                      <span>★ {anime.meanScore ?? "-"}</span>
+                      <span>★ {getScoreValue(anime) || "-"}</span>
                       <span>{anime.seasonYear ?? "-"}</span>
                     </div>
                   </div>
@@ -1728,7 +1368,7 @@ export default function App() {
                     <h4>{getTitle(item.anime, koTitleCache)}</h4>
                     <p className="reason">선택 근거: {item.reason}</p>
                     <div className="meta-row result-meta">
-                      <span>평점 {item.anime.meanScore ?? "-"}</span>
+                      <span>평점 {getScoreValue(item.anime) || "-"}</span>
                       <span>추천점수 {Math.round(item.score)}</span>
                     </div>
                     {!!koreanTags.length && (
