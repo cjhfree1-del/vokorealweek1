@@ -8,7 +8,6 @@
   --pink: #ff8fb6;
   --cyan: #79d8ea;
   --mint: #95e8cd;
-  --ui-scale: 1.2;
 }
 
 * {
@@ -20,27 +19,26 @@ body {
   font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(1120px 680px at 0% 0%, #eaf5ff 0%, transparent 70%),
-    radial-gradient(980px 560px at 100% 0%, #ffe6f1 0%, transparent 69%),
-    radial-gradient(940px 520px at 50% 100%, #e9fff6 0%, transparent 72%),
+    linear-gradient(90deg, #e8f4ff 0%, #f3f9ff 50%, #ffe9f3 100%),
+    radial-gradient(880px 520px at 10% 18%, rgba(159, 216, 243, 0.3) 0%, transparent 70%),
+    radial-gradient(900px 540px at 92% 18%, rgba(255, 196, 221, 0.36) 0%, transparent 70%),
     var(--bg);
 }
 
 .page {
-  width: calc(100% / var(--ui-scale));
-  max-width: calc(1240px / var(--ui-scale));
+  width: min(100%, 1240px);
   margin: 0 auto;
-  zoom: var(--ui-scale);
-  padding: 42px 18px 58px;
+  padding: clamp(26px, 3.3vw, 42px) clamp(12px, 2.2vw, 24px) clamp(42px, 4.8vw, 58px);
 }
 
 .page.landing {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  padding-top: 4px;
-  padding-bottom: 46px;
+  padding-top: clamp(2px, 0.8vw, 8px);
+  padding-bottom: clamp(36px, 4.2vw, 48px);
 }
 
 .hero {
@@ -48,12 +46,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 20px;
 }
 
 .page.landing .hero {
-  margin-top: 0;
+  margin-top: clamp(8px, 1.2vw, 14px);
 }
 
 .kicker {
@@ -68,6 +66,7 @@ body {
   border: 2px solid #ffc0d8;
   background: rgba(255, 255, 255, 0.82);
   cursor: pointer;
+  margin-top: 4px;
   padding: 10px 22px;
   text-transform: uppercase;
   font-family: "Jua", "Noto Sans KR", sans-serif;
@@ -83,9 +82,9 @@ body {
 }
 
 h1 {
-  margin: 2px 0 0;
-  font-size: clamp(2.2rem, 3.6vw, 3.2rem);
-  line-height: 1.14;
+  margin: 8px 0 0;
+  font-size: clamp(1.85rem, 3.5vw, 2.8rem);
+  line-height: 1.16;
   font-family: "Jua", "Noto Sans KR", sans-serif;
   letter-spacing: 0.01em;
   color: #184a65;
@@ -95,13 +94,20 @@ h1 {
   border-radius: 0;
   padding: 0;
   box-shadow: none;
-  max-width: min(940px, 95%);
+  max-width: min(900px, 95%);
 }
 
-.hero p {
-  margin: 2px 0 0;
-  color: #2b5a74;
-  font-size: 1.01rem;
+.hero-guide {
+  margin: 4px 0 0;
+  max-width: min(760px, 94%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(99, 132, 160, 0.45);
+  background: rgba(255, 255, 255, 0.78);
+  color: #214f6b;
+  font-size: clamp(0.96rem, 1.6vw, 1.05rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .panel {
@@ -130,24 +136,37 @@ h1 {
 .step1-panel {
   max-width: 1140px;
   margin: 10px auto 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.step1-lead {
+  margin: 0 0 14px;
+  color: #2f5f79;
+  font-size: clamp(0.94rem, 1.45vw, 1.02rem);
+  font-weight: 700;
 }
 
 .category-strip {
   position: relative;
-  width: 100%;
-  height: 260px;
+  width: min(100%, 1060px);
+  margin-inline: auto;
+  height: 276px;
   display: flex;
   border-radius: 24px;
   overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(44, 74, 98, 0.35);
   box-shadow: 0 18px 40px rgba(90, 117, 142, 0.24);
-  background: #203649;
+  background: linear-gradient(160deg, #1f3446 0%, #12293a 100%);
 }
 
 .category-strip__piece {
   flex: 1 1 0;
   min-width: 164px;
   border: 0;
-  padding: 0 10px 16px;
+  padding: 0 12px 18px;
   margin: 0;
   cursor: pointer;
   position: relative;
@@ -157,8 +176,8 @@ h1 {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  transition: transform 0.3s ease, filter 0.3s ease;
-  filter: brightness(0.98);
+  transition: transform 0.28s ease, filter 0.28s ease;
+  filter: brightness(1);
   transform-origin: center;
 }
 
@@ -166,13 +185,19 @@ h1 {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: linear-gradient(
+    180deg,
+    rgba(5, 16, 24, 0.16) 0%,
+    rgba(5, 16, 24, 0.35) 52%,
+    rgba(5, 16, 24, 0.76) 100%
+  );
   pointer-events: none;
 }
 
 .category-strip__piece:focus-visible {
   outline: 3px solid rgba(255, 255, 255, 0.95);
   outline-offset: -3px;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.72);
   z-index: 6;
 }
 
@@ -189,13 +214,13 @@ h1 {
 }
 
 .category-strip:hover .category-strip__piece {
-  filter: brightness(0.8);
+  filter: brightness(0.78) saturate(0.95);
 }
 
 .category-strip:hover .category-strip__piece:hover,
 .category-strip:hover .category-strip__piece:focus-visible {
   transform: scale(1.05);
-  filter: brightness(1.1);
+  filter: brightness(1.05) saturate(1.12);
   z-index: 5;
 }
 
@@ -203,14 +228,16 @@ h1 {
   position: relative;
   z-index: 2;
   font-family: "Jua", "Noto Sans KR", sans-serif;
-  font-size: clamp(0.92rem, 1.6vw, 1.24rem);
-  font-weight: 800;
+  font-size: clamp(1rem, 1.8vw, 1.34rem);
+  font-weight: 900;
   color: #ffffff;
-  text-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
-  padding: 5px 12px;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.01em;
+  padding: 7px 14px;
   border-radius: 999px;
-  background: rgba(21, 43, 58, 0.5);
-  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(9, 27, 40, 0.72);
+  backdrop-filter: blur(6px);
 }
 
 .primary-btn {
@@ -522,16 +549,12 @@ h1 {
 }
 
 @media (max-width: 1080px) {
-  :root {
-    --ui-scale: 1.1;
-  }
-
   .category-strip {
-    height: 200px;
+    height: 224px;
   }
 
   .category-strip__piece {
-    min-width: 150px;
+    min-width: 156px;
   }
 
   .grid.cards {
@@ -548,12 +571,8 @@ h1 {
 }
 
 @media (max-width: 700px) {
-  :root {
-    --ui-scale: 1;
-  }
-
   .page {
-    padding: 28px 12px 40px;
+    padding: 24px 12px 36px;
   }
 
   .page.landing {
@@ -563,7 +582,7 @@ h1 {
   }
 
   .page.landing .hero {
-    margin-top: 0;
+    margin-top: 6px;
     margin-bottom: 16px;
   }
 
@@ -572,14 +591,28 @@ h1 {
   }
 
   .category-strip {
-    height: 160px;
+    height: 192px;
     overflow-x: auto;
     overflow-y: hidden;
+    border-radius: 18px;
+    padding: 8px;
+    gap: 8px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
   }
 
   .category-strip__piece {
-    min-width: 136px;
-    padding-bottom: 10px;
+    flex: 0 0 168px;
+    min-width: 168px;
+    border-radius: 14px;
+    padding: 0 8px 14px;
+    scroll-snap-align: start;
+  }
+
+  .category-strip__piece--left,
+  .category-strip__piece--middle,
+  .category-strip__piece--right {
+    clip-path: none;
   }
 
   .grid.cards,
@@ -605,9 +638,19 @@ h1 {
     margin-left: 0;
   }
 
+  .hero-guide {
+    border-radius: 14px;
+    padding: 8px 12px;
+    line-height: 1.4;
+  }
+
+  .step1-lead {
+    margin-bottom: 12px;
+  }
+
   .category-strip__piece-label {
-    padding: 4px 10px;
-    font-size: 0.86rem;
+    padding: 6px 11px;
+    font-size: 0.95rem;
   }
 
   .anime-card {

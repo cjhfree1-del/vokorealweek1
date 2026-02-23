@@ -1403,10 +1403,12 @@ export default function App() {
           MINK ANI
         </button>
         <h1>취향 고르면, 딱 맞는 다음 애니 추천해줄게</h1>
+        <p className="hero-guide">카테고리 1개 선택 → 취향 기반 추천 4개를 바로 보여줘요</p>
       </header>
 
       {activeStep === 1 && (
       <section className="flow-panel step1-panel">
+        <p className="step1-lead">먼저 원하는 분위기의 카테고리를 하나 골라주세요.</p>
         <CategoryStrip items={categoryStripItems} onPick={handleCategoryPick} />
         {categoryLoading && <p className="loading-text">카테고리 애니 불러오는 중...</p>}
         {categoryError && <p className="error-text">{categoryError}</p>}
