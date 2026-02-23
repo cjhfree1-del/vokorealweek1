@@ -35,6 +35,7 @@ import {
   scoreFinalCandidate,
   topPreferenceTags,
 } from "./reco/scoring";
+import { buildSemanticSimilarityMap } from "./reco/semantic";
 import {
   createEmptyUserProfile,
   PROFILE_EXPOSURE_LIMIT,
@@ -1212,10 +1213,14 @@ export default function App() {
         .filter((anime) => isCategoryAligned(selectedCategory.id, anime))
         .slice(0, STEP2_POOL_MAX);
 
+      const semanticSimilarityById = buildSemanticSimilarityMap(pickedBaseAnimes, candidatePool);
       const profileForScore = userProfileRef.current;
       const scored = candidatePool
         .map((anime) => {
-          const { breakdown, tagVector } = scoreFinalCandidate(anime, seedPreference);
+          const semanticSimilarity = semanticSimilarityById.get(anime.id);
+          const { breakdown, tagVector } = scoreFinalCandidate(anime, seedPreference, {
+            semanticSimilarity,
+          });
           const profileScore = scoreWithProfile(anime, profileForScore);
           const total = Math.max(0, Math.min(1, breakdown.total + profileScore.total));
           const candidate = {
@@ -1268,6 +1273,7 @@ export default function App() {
         console.groupCollapsed(`[RECO][FINAL] seeds=${pickedBaseAnimes.length} candidates=${scored.length}`);
         console.log("queryTopTags", topTagsForQuery.slice(0, 12));
         console.log("preferenceTopTags", topPreferenceTags(seedPreference, 10));
+        console.log("semanticAvg", Number((scored.reduce((acc, row) => acc + row.breakdown.semantic, 0) / Math.max(1, scored.length)).toFixed(3)));
         console.log("profileLikedTop", topLikedTags(profileForScore, 8));
         console.log("profileDislikedTop", topDislikedTags(profileForScore, 8));
         console.log("profileExposureCount", profileForScore.exposureHistory.length);

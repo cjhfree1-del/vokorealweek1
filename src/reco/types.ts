@@ -91,6 +91,7 @@ export type SeedPreferenceVector = {
 
 export type FinalScoreBreakdown = {
   similarity: number;
+  semantic: number;
   quality: number;
   novelty: number;
   profileBonus?: number;

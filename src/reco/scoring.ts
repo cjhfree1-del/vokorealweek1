@@ -1,8 +1,9 @@
 import type { Anime, AnimeTag, FinalScoreBreakdown, ScoredFinalCandidate, SeedPreferenceVector, YearBucket } from "./types";
 
-const FINAL_WEIGHT_SIMILARITY = 0.65;
+const FINAL_WEIGHT_SIMILARITY = 0.52;
+const FINAL_WEIGHT_SEMANTIC = 0.15;
 const FINAL_WEIGHT_QUALITY = 0.2;
-const FINAL_WEIGHT_NOVELTY = 0.15;
+const FINAL_WEIGHT_NOVELTY = 0.13;
 
 function clamp(value: number, min = 0, max = 1): number {
   if (value < min) return min;
@@ -141,16 +142,19 @@ export function dominantTagNames(anime: Anime, limit = 4): string[] {
 export function scoreFinalCandidate(
   anime: Anime,
   preference: SeedPreferenceVector,
+  options?: { semanticSimilarity?: number },
 ): {
   breakdown: FinalScoreBreakdown;
   tagVector: Map<string, number>;
 } {
   const candidateVector = buildCandidateTagVector(anime);
   const similarity = cosineSimilarity(preference.tagWeights, candidateVector);
+  const semantic = clamp(options?.semanticSimilarity ?? similarity);
   const quality = normalizeQualityScore(anime);
   const noveltyResult = computeNovelty(anime, preference);
   const total =
     FINAL_WEIGHT_SIMILARITY * similarity +
+    FINAL_WEIGHT_SEMANTIC * semantic +
     FINAL_WEIGHT_QUALITY * quality +
     FINAL_WEIGHT_NOVELTY * noveltyResult.score;
 
@@ -158,6 +162,7 @@ export function scoreFinalCandidate(
     tagVector: candidateVector,
     breakdown: {
       similarity: clamp(similarity),
+      semantic,
       quality: clamp(quality),
       novelty: clamp(noveltyResult.score),
       rareTagScore: noveltyResult.rareTagScore,
@@ -175,6 +180,9 @@ export function buildFinalReason(candidate: ScoredFinalCandidate): string {
   }
   if (profileBonus <= -0.08 && tagText) {
     return `비선호 태그를 피하면서도 ${tagText} 유사도를 유지한 후보를 선택했습니다.`;
+  }
+  if (candidate.breakdown.semantic >= 0.67 && tagText) {
+    return `텍스트 기반 유사도(줄거리/태그)와 ${tagText} 결이 높아 추천했습니다.`;
   }
   if (candidate.breakdown.similarity >= 0.62 && tagText) {
     return `선택작과의 태그 유사도(예: ${tagText})가 높아 우선 추천했습니다.`;
