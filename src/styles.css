@@ -8,7 +8,7 @@
   --pink: #ff6f91;
   --cyan: #32c6d8;
   --mint: #6ad8b5;
-  --ui-scale: 1.35;
+  --ui-scale: 1.2;
 }
 
 * {
@@ -515,6 +515,10 @@ h1 {
 }
 
 @media (max-width: 1080px) {
+  :root {
+    --ui-scale: 1.1;
+  }
+
   .category-strip {
     height: 200px;
   }
@@ -537,6 +541,10 @@ h1 {
 }
 
 @media (max-width: 700px) {
+  :root {
+    --ui-scale: 1;
+  }
+
   .page {
     padding: 28px 12px 40px;
   }
