@@ -19,10 +19,11 @@ body {
   font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
   color: var(--ink);
   background:
-    linear-gradient(90deg, #e8f4ff 0%, #f3f9ff 50%, #ffe9f3 100%),
-    radial-gradient(880px 520px at 10% 18%, rgba(159, 216, 243, 0.3) 0%, transparent 70%),
-    radial-gradient(900px 540px at 92% 18%, rgba(255, 196, 221, 0.36) 0%, transparent 70%),
+    linear-gradient(90deg, #cfe6ff 0%, #e9f5ff 48%, #ffd4e6 100%),
+    radial-gradient(820px 520px at 8% 14%, rgba(113, 190, 234, 0.48) 0%, transparent 68%),
+    radial-gradient(860px 560px at 94% 16%, rgba(255, 163, 201, 0.5) 0%, transparent 70%),
     var(--bg);
+  background-attachment: fixed;
 }
 
 .page {
@@ -111,10 +112,11 @@ h1 {
 }
 
 .panel {
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.92);
   border: 2px solid var(--line);
   border-radius: 20px;
   box-shadow: 0 14px 32px rgba(73, 106, 137, 0.18);
+  backdrop-filter: blur(5px);
   padding: 20px;
   margin-bottom: 16px;
 }
