@@ -46,7 +46,7 @@ body {
   font-size: 0.82rem;
   letter-spacing: 0.12em;
   font-weight: 800;
-  color: #476278;
+  color: #2e5f7d;
 }
 
 .logo-button {
@@ -65,11 +65,12 @@ h1 {
   margin: 8px 0 10px;
   font-size: clamp(2rem, 3.1vw, 2.9rem);
   line-height: 1.08;
+  color: #143c52;
 }
 
 .hero p {
   margin: 0;
-  color: #486377;
+  color: #2b5a74;
   font-size: 1.01rem;
 }
 
@@ -108,7 +109,7 @@ h1 {
 
 .chip-group {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   justify-content: center;
 }
@@ -483,6 +484,10 @@ h1 {
 }
 
 @media (max-width: 1080px) {
+  .chip-group {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .grid.cards {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

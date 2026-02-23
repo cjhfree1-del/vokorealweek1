@@ -249,6 +249,22 @@ function hasTag(tags: string[], regex: RegExp): boolean {
   return tags.some((tag) => regex.test(tag));
 }
 
+function weightedTagSignal(media: Anime, regex: RegExp): number {
+  return (media.tags ?? []).reduce((acc, tag) => {
+    const name = normalizeTagName(tag.name);
+    if (!name) return acc;
+    if (!regex.test(name)) return acc;
+    return acc + tagWeight(tag.rank);
+  }, 0);
+}
+
+function weightedGenreSignal(genres: Set<string>, weights: Record<string, number>): number {
+  return Object.entries(weights).reduce((acc, [genre, weight]) => {
+    if (!hasGenre(genres, genre)) return acc;
+    return acc + weight;
+  }, 0);
+}
+
 function isSpecialThemeAnime(media: Anime): boolean {
   const genres = new Set((media.genres ?? []).map((genre) => genre.toLowerCase()));
   const tags = (media.tags ?? []).map((tag) => normalizeTagName(tag.name)).filter(Boolean);
@@ -266,55 +282,110 @@ function isSpecialThemeAnime(media: Anime): boolean {
   return true;
 }
 
-export function isCategoryAligned(categoryId: string, media: Anime): boolean {
+export function isCategoryAligned(categoryId: string, media: Anime, mode: "strict" | "loose" = "strict"): boolean {
   const genres = new Set((media.genres ?? []).map((genre) => genre.toLowerCase()));
-  const tags = (media.tags ?? []).map((tag) => normalizeTagName(tag.name)).filter(Boolean);
+  const actionTagSignal = weightedTagSignal(media, ACTION_THEME_TAG_REGEX);
+  const romanceTagSignal = weightedTagSignal(media, ROMANCE_THEME_TAG_REGEX);
+  const healingTagSignal = weightedTagSignal(media, HEALING_THEME_TAG_REGEX);
+  const psychologicalTagSignal = weightedTagSignal(media, PSYCHOLOGICAL_THEME_TAG_REGEX);
+  const intenseTagSignal = weightedTagSignal(media, INTENSE_THEME_TAG_REGEX);
 
   switch (categoryId) {
-    case "action":
-      return hasGenre(genres, "action") || hasGenre(genres, "adventure") || hasTag(tags, ACTION_THEME_TAG_REGEX);
-    case "romance": {
-      const romanceCore = hasGenre(genres, "romance") || hasTag(tags, ROMANCE_THEME_TAG_REGEX);
-      if (!romanceCore) return false;
-      const actionHeavy =
-        hasGenre(genres, "action") ||
-        hasGenre(genres, "adventure") ||
-        hasGenre(genres, "mecha") ||
-        hasTag(tags, ACTION_THEME_TAG_REGEX);
+    case "action": {
+      const actionStrength =
+        weightedGenreSignal(genres, {
+          action: 1.4,
+          adventure: 1.15,
+          fantasy: 0.5,
+          "sci-fi": 0.45,
+          mecha: 0.4,
+        }) +
+        actionTagSignal * 1.2;
       const romanceStrength =
-        Number(hasGenre(genres, "romance")) * 2 +
-        Number(hasTag(tags, ROMANCE_THEME_TAG_REGEX)) * 2 +
-        Number(hasGenre(genres, "comedy")) +
-        Number(hasGenre(genres, "drama"));
-      return !(actionHeavy && romanceStrength < 4);
+        weightedGenreSignal(genres, { romance: 1.4, drama: 0.4, comedy: 0.3 }) + romanceTagSignal * 1.05;
+
+      if (actionStrength < (mode === "strict" ? 1.9 : 1.35)) return false;
+      if (romanceStrength > actionStrength + (mode === "strict" ? 0.6 : 1.0)) return false;
+      return true;
+    }
+    case "romance": {
+      const romanceStrength =
+        weightedGenreSignal(genres, {
+          romance: 2.6,
+          drama: 0.7,
+          comedy: 0.55,
+          "slice of life": 0.4,
+        }) +
+        romanceTagSignal * 1.55;
+      const actionFantasyStrength =
+        weightedGenreSignal(genres, {
+          action: 1.3,
+          adventure: 1.15,
+          fantasy: 1.05,
+          mecha: 1.1,
+          "sci-fi": 0.85,
+        }) +
+        actionTagSignal * 1.2;
+      const romanceCore = hasGenre(genres, "romance") || romanceTagSignal >= (mode === "strict" ? 0.9 : 0.55);
+
+      if (!romanceCore) return false;
+      if (romanceStrength < (mode === "strict" ? 2.15 : 1.6)) return false;
+      if (actionFantasyStrength > romanceStrength + (mode === "strict" ? 0.2 : 0.9)) return false;
+      return true;
     }
     case "healing": {
-      const healingCore = hasGenre(genres, "slice of life") || hasTag(tags, HEALING_THEME_TAG_REGEX);
-      if (!healingCore) return false;
-      const intenseTheme =
-        hasGenre(genres, "action") ||
-        hasGenre(genres, "adventure") ||
-        hasGenre(genres, "horror") ||
-        hasGenre(genres, "thriller") ||
-        hasTag(tags, ACTION_THEME_TAG_REGEX) ||
-        hasTag(tags, INTENSE_THEME_TAG_REGEX);
-      const strongHealingSignal =
-        hasGenre(genres, "slice of life") || hasTag(tags, /(iyashikei|healing|wholesome|slow life)/i);
-      return !(intenseTheme && !strongHealingSignal);
+      const healingStrength =
+        weightedGenreSignal(genres, {
+          "slice of life": 2.3,
+          comedy: 0.8,
+          drama: 0.45,
+          music: 0.2,
+          fantasy: 0.15,
+        }) +
+        healingTagSignal * 1.5;
+      const intenseStrength =
+        weightedGenreSignal(genres, {
+          action: 1.2,
+          adventure: 1.05,
+          horror: 1.35,
+          thriller: 1.2,
+          psychological: 0.75,
+          mecha: 1.0,
+        }) +
+        (actionTagSignal + intenseTagSignal) * 1.1;
+      const dramaWithoutSlice =
+        hasGenre(genres, "drama") &&
+        !hasGenre(genres, "slice of life") &&
+        !hasGenre(genres, "comedy") &&
+        healingTagSignal < 0.4;
+
+      if (healingStrength < (mode === "strict" ? 2.0 : 1.45)) return false;
+      if (intenseStrength > healingStrength + (mode === "strict" ? 0.35 : 0.9)) return false;
+      if (dramaWithoutSlice) return false;
+      return true;
     }
     case "psychological": {
-      const psychologicalCore =
-        hasGenre(genres, "psychological") ||
-        hasGenre(genres, "mystery") ||
-        hasGenre(genres, "thriller") ||
-        hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
-      if (!psychologicalCore) return false;
-      const pureActionFantasy =
-        (hasGenre(genres, "action") || hasGenre(genres, "adventure") || hasGenre(genres, "fantasy")) &&
-        !hasGenre(genres, "psychological") &&
-        !hasGenre(genres, "mystery") &&
-        !hasTag(tags, PSYCHOLOGICAL_THEME_TAG_REGEX);
-      return !pureActionFantasy;
+      const psychologicalStrength =
+        weightedGenreSignal(genres, {
+          psychological: 2.0,
+          mystery: 1.15,
+          thriller: 1.05,
+          drama: 0.4,
+          "sci-fi": 0.45,
+        }) +
+        psychologicalTagSignal * 1.55;
+      const actionFantasyStrength =
+        weightedGenreSignal(genres, {
+          action: 1.1,
+          adventure: 1.0,
+          fantasy: 0.95,
+          mecha: 0.85,
+        }) +
+        actionTagSignal;
+
+      if (psychologicalStrength < (mode === "strict" ? 1.85 : 1.35)) return false;
+      if (actionFantasyStrength > psychologicalStrength + (mode === "strict" ? 0.65 : 1.1)) return false;
+      return true;
     }
     case "special":
       return isSpecialThemeAnime(media);
@@ -323,8 +394,8 @@ export function isCategoryAligned(categoryId: string, media: Anime): boolean {
   }
 }
 
-export function filterByCategory(categoryId: string, medias: Anime[]): Anime[] {
-  return medias.filter((media) => isCategoryAligned(categoryId, media));
+export function filterByCategory(categoryId: string, medias: Anime[], mode: "strict" | "loose" = "strict"): Anime[] {
+  return medias.filter((media) => isCategoryAligned(categoryId, media, mode));
 }
 
 export function getCategoryDiscoveryPresets(categoryId: string, fallbackGenres: string[]): DiscoverPreset[] {

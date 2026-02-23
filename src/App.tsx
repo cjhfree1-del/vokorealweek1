@@ -45,7 +45,7 @@ import {
   type FeedbackSignal,
   type UserProfile,
 } from "./reco/userProfile";
-import type { Anime, Category, DiscoveryPayload, FinalRecommendation, RecommendationPayload } from "./reco/types";
+import type { Anime, Category, DiscoverPreset, DiscoveryPayload, FinalRecommendation, RecommendationPayload } from "./reco/types";
 
 const CATEGORIES: Category[] = [
   {
@@ -96,6 +96,9 @@ const STEP2_DISCOVERY_PAGE_SIZE = 20;
 const STEP2_DISCOVERY_BATCH_SIZE = 6;
 const STEP2_DISCOVERY_EARLY_STOP_BUFFER = 40;
 const STEP2_CATEGORY_CACHE_TTL_MS = 3 * 60 * 1000;
+const STEP2_FALLBACK_PAGE_SIZE = 42;
+const STEP2_FALLBACK_MIN_AVERAGE_SCORE = 52;
+const STEP2_FALLBACK_MIN_POPULARITY = 500;
 
 const { byMalId: KOREAN_TITLE_BY_MAL_ID, byAlias: KOREAN_TITLE_BY_KEY } = buildKoFallbackIndexes();
 
@@ -798,7 +801,34 @@ export default function App() {
       }
 
       const presets = getCategoryDiscoveryPresets(category.id, category.genres).slice(0, STEP2_PRESET_LIMIT);
+      const fallbackPresets: DiscoverPreset[] = [
+        ...presets,
+        {
+          id: `${category.id}_fallback_all`,
+          genreIn: category.genres,
+          perPage: STEP2_FALLBACK_PAGE_SIZE,
+        },
+        ...category.genres.slice(0, 3).map((genre, index) => ({
+          id: `${category.id}_fallback_genre_${index}`,
+          genreIn: [genre],
+          perPage: STEP2_FALLBACK_PAGE_SIZE,
+        })),
+      ];
+      const uniqueFallbackPresets = Array.from(
+        new Map(
+          fallbackPresets.map((preset) => [
+            `${preset.genreIn.join("|")}::${(preset.tagIn ?? []).join("|")}`,
+            preset,
+          ]),
+        ).values(),
+      ).slice(0, 8);
       const candidateById = new Map<number, Anime>();
+
+      type DiscoveryPassOptions = {
+        presetRows?: DiscoverPreset[];
+        alignmentMode?: "strict" | "loose";
+        allowSeenExclude?: boolean;
+      };
 
       async function runDiscoveryPass(
         minAverageScore: number,
@@ -806,8 +836,12 @@ export default function App() {
         page: number,
         perPage: number,
         sorts: Array<(typeof STEP2_DISCOVERY_SORTS)[number]>,
+        options?: DiscoveryPassOptions,
       ): Promise<void> {
-        const plans = presets.flatMap((preset) =>
+        const passPresets = options?.presetRows?.length ? options.presetRows : presets;
+        const alignmentMode = options?.alignmentMode ?? "strict";
+        const withExclude = options?.allowSeenExclude !== false;
+        const plans = passPresets.flatMap((preset) =>
           sorts.map((sort) => ({
             genreIn: preset.genreIn.length ? preset.genreIn : category.genres,
             tagIn: preset.tagIn && preset.tagIn.length ? preset.tagIn : undefined,
@@ -836,7 +870,7 @@ export default function App() {
                   sort: [plan.sort],
                   page,
                   perPage: plan.perPage,
-                  excludeIds,
+                  excludeIds: withExclude ? excludeIds : undefined,
                   minAverageScore: plan.minAverageScore,
                   minPopularity: plan.minPopularity,
                 },
@@ -853,9 +887,9 @@ export default function App() {
               return;
             }
             successCount += 1;
-            const media = filterByCategory(category.id, result.value.Page?.media ?? []);
+            const media = filterByCategory(category.id, result.value.Page?.media ?? [], alignmentMode);
             media.forEach((anime) => {
-              if (excludeSet.has(anime.id)) return;
+              if (withExclude && excludeSet.has(anime.id)) return;
               if ((anime.popularity ?? 0) < plan.minPopularity) return;
               if (getScoreValue(anime) < plan.minAverageScore) return;
 
@@ -899,6 +933,37 @@ export default function App() {
         candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
       }
 
+      if (candidatePool.length < STEP2_TARGET_COUNT) {
+        await runDiscoveryPass(
+          STEP2_FALLBACK_MIN_AVERAGE_SCORE,
+          STEP2_FALLBACK_MIN_POPULARITY,
+          1,
+          STEP2_FALLBACK_PAGE_SIZE,
+          STEP2_DISCOVERY_SORTS,
+          {
+            presetRows: uniqueFallbackPresets,
+            alignmentMode: "loose",
+          },
+        );
+
+        if (candidateById.size < STEP2_TARGET_COUNT && excludeIds.length) {
+          await runDiscoveryPass(
+            STEP2_FALLBACK_MIN_AVERAGE_SCORE,
+            STEP2_FALLBACK_MIN_POPULARITY,
+            2,
+            STEP2_FALLBACK_PAGE_SIZE,
+            STEP2_DISCOVERY_SORTS.slice(0, 2),
+            {
+              presetRows: uniqueFallbackPresets,
+              alignmentMode: "loose",
+              allowSeenExclude: false,
+            },
+          );
+        }
+
+        candidatePool = dedupeByFranchise(Array.from(candidateById.values()));
+      }
+
       candidatePool = candidatePool
         .sort((a, b) => {
           const bScore = (b.popularity ?? 0) + getScoreValue(b) * 120 + Math.max(0, b.trending ?? 0) * 0.1;
@@ -906,6 +971,8 @@ export default function App() {
           return bScore - aScore;
         })
         .slice(0, STEP2_POOL_MAX);
+
+      candidatePool = filterByCategory(category.id, candidatePool, "strict");
 
       if (!candidatePool.length) {
         setCategoryError("새로 보여줄 작품이 부족합니다. 카테고리를 바꿔보세요.");
@@ -918,7 +985,7 @@ export default function App() {
         getFranchiseKey: franchiseKey,
         exposureHistory: userProfileRef.current.exposureHistory,
       });
-      const nextList = selection.selected;
+      const nextList = filterByCategory(category.id, selection.selected, "strict");
 
       if (debug) {
         console.groupCollapsed(`[RECO][STEP2] ${category.id} selected=${nextList.length} pool=${selection.poolSize}`);
