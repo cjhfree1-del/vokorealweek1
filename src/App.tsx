@@ -1390,12 +1390,11 @@ export default function App() {
           MINK ANI
         </button>
         <h1>취향 고르면, 딱 맞는 다음 애니를 추천해줄게</h1>
-        <p>카테고리 선택 → 재밌게 본 애니 선택 → 최종 추천(4작품)</p>
       </header>
 
       {activeStep === 1 && (
       <section className="flow-panel step1-panel">
-        <h2>STEP 1. 카테고리 선택</h2>
+        <h2>카테고리 선택</h2>
         <div className="chip-group">
           {CATEGORIES.map((category) => {
             const preview = category.previewImage;
