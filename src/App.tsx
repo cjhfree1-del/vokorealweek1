@@ -1402,7 +1402,7 @@ export default function App() {
         >
           MINK ANI
         </button>
-        <h1>취향 고르면, 딱 맞는 다음 애니를 추천해줄게</h1>
+        <h1>취향 고르면, 딱 맞는 다음 애니 추천해줄게</h1>
       </header>
 
       {activeStep === 1 && (

@@ -1,13 +1,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Jua&display=swap");
 
 :root {
-  --bg: #f5f9ff;
-  --ink: #172430;
-  --line: #1e3344;
+  --bg: #fff8fc;
+  --ink: #1d2f45;
+  --line: #3e5f7a;
   --card: #ffffff;
-  --pink: #ff6f91;
-  --cyan: #32c6d8;
-  --mint: #6ad8b5;
+  --pink: #ff8fb6;
+  --cyan: #79d8ea;
+  --mint: #95e8cd;
   --ui-scale: 1.2;
 }
 
@@ -20,8 +20,9 @@ body {
   font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(1100px 650px at 0% 0%, #e6f3ff 0%, transparent 70%),
-    radial-gradient(900px 520px at 100% 0%, #ffe9f1 0%, transparent 68%),
+    radial-gradient(1120px 680px at 0% 0%, #eaf5ff 0%, transparent 70%),
+    radial-gradient(980px 560px at 100% 0%, #ffe6f1 0%, transparent 69%),
+    radial-gradient(940px 520px at 50% 100%, #e9fff6 0%, transparent 72%),
     var(--bg);
 }
 
@@ -44,42 +45,57 @@ body {
 
 .hero {
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 28px;
 }
 
 .page.landing .hero {
-  margin-top: -60px;
+  margin-top: -88px;
 }
 
 .kicker {
   margin: 0;
-  font-size: 1.08rem;
-  letter-spacing: 0.12em;
+  font-size: 1.3rem;
+  letter-spacing: 0.14em;
   font-weight: 800;
-  color: #2e5f7d;
+  color: #b14579;
 }
 
 .logo-button {
-  border: 0;
-  background: transparent;
+  border: 2px solid #ffc0d8;
+  background: rgba(255, 255, 255, 0.82);
   cursor: pointer;
-  padding: 0;
+  padding: 8px 18px;
   text-transform: uppercase;
   font-family: "Jua", "Noto Sans KR", sans-serif;
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(255, 145, 188, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
 .logo-button:hover {
-  color: #2f4f64;
+  color: #97386a;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(255, 145, 188, 0.28);
 }
 
 h1 {
-  margin: 12px 0 0;
+  margin: 0;
   font-size: clamp(2.2rem, 3.6vw, 3.2rem);
   line-height: 1.14;
   font-family: "Jua", "Noto Sans KR", sans-serif;
   letter-spacing: 0.01em;
-  color: #103a52;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.68);
+  color: #12445f;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.78);
+  border: 2px solid #c4def4;
+  border-radius: 22px;
+  padding: 10px 18px;
+  box-shadow: 0 10px 26px rgba(85, 117, 148, 0.18);
+  max-width: min(980px, 95%);
 }
 
 .hero p {
@@ -92,7 +108,7 @@ h1 {
   background: var(--card);
   border: 2px solid var(--line);
   border-radius: 20px;
-  box-shadow: 7px 7px 0 var(--line);
+  box-shadow: 0 14px 32px rgba(73, 106, 137, 0.18);
   padding: 20px;
   margin-bottom: 16px;
 }
@@ -113,7 +129,7 @@ h1 {
 
 .step1-panel {
   max-width: 1140px;
-  margin: 8px auto 24px;
+  margin: 14px auto 24px;
 }
 
 .category-strip {
@@ -123,8 +139,8 @@ h1 {
   display: flex;
   border-radius: 24px;
   overflow: hidden;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-  background: #132434;
+  box-shadow: 0 18px 40px rgba(90, 117, 142, 0.24);
+  background: #203649;
 }
 
 .category-strip__piece {
@@ -150,7 +166,7 @@ h1 {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.28);
   pointer-events: none;
 }
 
@@ -193,7 +209,7 @@ h1 {
   text-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
   padding: 5px 12px;
   border-radius: 999px;
-  background: rgba(13, 29, 40, 0.38);
+  background: rgba(21, 43, 58, 0.5);
   backdrop-filter: blur(4px);
 }
 
@@ -211,7 +227,7 @@ h1 {
 
 .loading-text {
   margin: 12px 0 0;
-  color: #496474;
+  color: #5a7487;
   font-weight: 700;
 }
 
@@ -232,16 +248,16 @@ h1 {
 .picked-count {
   margin: 0;
   font-weight: 700;
-  color: #34576c;
+  color: #4f6379;
   font-size: 0.88rem;
 }
 
 .picked-count-badge {
   margin: 0;
-  border: 1px solid #2a4556;
+  border: 1px solid #a4bcd2;
   border-radius: 999px;
-  background: #e9f6ff;
-  color: #173241;
+  background: #f2f9ff;
+  color: #2b4760;
   font-size: 0.84rem;
   font-weight: 800;
   padding: 3px 10px;
@@ -273,9 +289,9 @@ h1 {
 }
 
 .picked-pill {
-  border: 1px solid #2a4556;
-  background: #ecf8ff;
-  color: #173241;
+  border: 1px solid #a4bcd2;
+  background: #f3f9ff;
+  color: #2b4760;
   border-radius: 999px;
   padding: 6px 12px;
   font: inherit;
@@ -320,9 +336,9 @@ h1 {
 }
 
 .anime-card {
-  border: 2px solid #2a4556;
+  border: 2px solid #a5bdd3;
   border-radius: 14px;
-  background: #fbfeff;
+  background: #ffffff;
   padding: 10px;
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
@@ -349,13 +365,13 @@ h1 {
 
 .anime-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 16px rgba(14, 35, 44, 0.12);
+  box-shadow: 0 10px 20px rgba(79, 111, 140, 0.18);
 }
 
 .anime-card.selected {
-  border-color: #ff5f86;
-  box-shadow: 0 0 0 3px rgba(255, 95, 134, 0.18);
-  background: #fff5f8;
+  border-color: #ff86ad;
+  box-shadow: 0 0 0 3px rgba(255, 134, 173, 0.2);
+  background: #fff7fb;
 }
 
 .anime-card img {
@@ -363,7 +379,7 @@ h1 {
   height: 136px;
   object-fit: cover;
   border-radius: 10px;
-  border: 2px solid #2f4b5b;
+  border: 2px solid #a7bfd4;
 }
 
 .anime-card h4 {
@@ -374,7 +390,7 @@ h1 {
 
 .anime-card p {
   margin: 7px 0 0;
-  color: #476273;
+  color: #5f7489;
   font-size: 0.83rem;
   line-height: 1.35;
 }
@@ -384,7 +400,7 @@ h1 {
   display: flex;
   gap: 8px;
   font-size: 0.76rem;
-  color: #4d6879;
+  color: #5f7488;
 }
 
 .anime-card.compact {
@@ -401,8 +417,8 @@ h1 {
 }
 
 .anime-card.result {
-  background: linear-gradient(145deg, #ffffff 0%, #f5fcff 100%);
-  border-color: #203c50;
+  background: linear-gradient(145deg, #ffffff 0%, #f7fcff 100%);
+  border-color: #9ab6cf;
 }
 
 .result-grid {
@@ -439,7 +455,7 @@ h1 {
 
 .result-rank {
   margin: 0;
-  color: #32566d;
+  color: #4c647c;
   font-size: 0.8rem;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -447,7 +463,7 @@ h1 {
 
 .anime-card p.reason {
   margin: 0;
-  color: #17384a;
+  color: #2b4a62;
   font-weight: 800;
   font-size: 0.94rem;
   line-height: 1.5;
@@ -459,11 +475,11 @@ h1 {
 }
 
 .meta-row.result-meta span {
-  border: 1px solid #2a4556;
+  border: 1px solid #a4bcd2;
   border-radius: 999px;
   padding: 4px 10px;
-  background: #ecf8ff;
-  color: #173241;
+  background: #f3f9ff;
+  color: #2b4760;
   font-weight: 700;
   font-size: 0.8rem;
 }
@@ -476,12 +492,12 @@ h1 {
 }
 
 .tag-row span {
-  border: 1px solid #2a4556;
+  border: 1px solid #a4bcd2;
   border-radius: 999px;
   padding: 3px 9px;
   font-size: 0.78rem;
-  color: #173241;
-  background: #dcf5ff;
+  color: #2b4760;
+  background: #eaf6ff;
 }
 
 .error-text {
@@ -496,7 +512,7 @@ h1 {
 
 .footer-note {
   text-align: center;
-  color: #4c6678;
+  color: #657c8f;
   font-size: 0.84rem;
   margin-top: 12px;
 }
@@ -547,7 +563,7 @@ h1 {
   }
 
   .page.landing .hero {
-    margin-top: 0;
+    margin-top: -8px;
     margin-bottom: 20px;
   }
 
