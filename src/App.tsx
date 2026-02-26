@@ -1,334 +1,300 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-type Tone = string;
-type Length = "단편" | "중편" | "장편";
+type CharacterId = "yuna" | "aria";
 
-type WebNovel = {
+type GameState = {
+  yuna: number;
+  aria: number;
+  courage: number;
+};
+
+type Choice = {
+  label: string;
+  effects?: Partial<GameState>;
+  next: string | ((state: GameState) => string);
+};
+
+type Scene = {
   id: string;
-  title: string;
-  author: string;
-  platform: string;
-  genres: string[];
-  tones: Tone[];
-  length: Length;
-  intro: string;
-  hook: string;
-  completed: boolean;
+  day: string;
+  place: string;
+  speaker: string;
+  text: string;
+  choices?: Choice[];
+  next?: string;
 };
 
-type RankedNovel = {
-  novel: WebNovel;
-  score: number;
-  personal: number;
+const INITIAL_STATE: GameState = {
+  yuna: 0,
+  aria: 0,
+  courage: 0,
 };
 
-const USER_KEY = "novel_user_v1";
-const LIKE_PREFIX = "novel_likes_";
+const SCENES: Scene[] = [
+  {
+    id: "prologue",
+    day: "4월 3일 월요일",
+    place: "새봄고 2학년 복도",
+    speaker: "나",
+    text: "전학 첫날. 문 앞에서 숨 고르는 사이, 누군가 내 이름을 먼저 불렀다.",
+    next: "first-meet",
+  },
+  {
+    id: "first-meet",
+    day: "4월 3일 월요일",
+    place: "교실 앞",
+    speaker: "유나",
+    text: "" +
+      "혹시 전학생? 나는 유나. 길 잃을까 봐 기다렸어. 같이 들어갈래?",
+    choices: [
+      { label: "고맙다고 웃으며 같이 들어간다", effects: { yuna: 2, courage: 1 }, next: "class-intro" },
+      { label: "긴장해서 짧게 인사만 한다", effects: { yuna: 1 }, next: "class-intro" },
+      { label: "괜히 허세 부리며 혼자 들어간다", effects: { courage: 1 }, next: "class-intro" },
+    ],
+  },
+  {
+    id: "class-intro",
+    day: "4월 5일 수요일",
+    place: "방과 후 교실",
+    speaker: "아리아",
+    text: "창가에 앉은 아리아가 책을 덮었다. '넌 소설 좋아하지? 문예부 모집 중이야.'",
+    choices: [
+      { label: "관심 있다며 자세히 묻는다", effects: { aria: 2 }, next: "club-split" },
+      { label: "유나와 운동장 구경하러 간다", effects: { yuna: 2 }, next: "club-split" },
+      { label: "둘 다 신경 쓰여 반반 시간 쓰기", effects: { yuna: 1, aria: 1 }, next: "club-split" },
+    ],
+  },
+  {
+    id: "club-split",
+    day: "4월 11일 화요일",
+    place: "동아리 홍보제",
+    speaker: "나",
+    text: "축제 준비를 도울 사람이 필요하다는 연락이 동시에 왔다. 어디로 갈까?",
+    choices: [
+      { label: "유나의 밴드부 무대 리허설 도와주기", effects: { yuna: 2 }, next: "night-call" },
+      { label: "아리아의 문예부 낭독회 원고 교정", effects: { aria: 2 }, next: "night-call" },
+      { label: "둘 다 무리해서 뛰어다닌다", effects: { yuna: 1, aria: 1, courage: 1 }, next: "night-call" },
+    ],
+  },
+  {
+    id: "night-call",
+    day: "4월 17일 월요일",
+    place: "기숙사 옥상",
+    speaker: "나",
+    text: "밤 11시. 핸드폰엔 유나와 아리아의 부재중이 동시에 찍혀 있다.",
+    choices: [
+      { label: "유나에게 먼저 전화한다", effects: { yuna: 2 }, next: "pre-festival" },
+      { label: "아리아에게 먼저 전화한다", effects: { aria: 2 }, next: "pre-festival" },
+      { label: "둘 다 문자로 내일 보자고 보낸다", effects: { courage: 1 }, next: "pre-festival" },
+    ],
+  },
+  {
+    id: "pre-festival",
+    day: "4월 28일 금요일",
+    place: "봄빛제 전날",
+    speaker: "유나",
+    text: "'내일 끝나고 할 말 있어.' 유나의 메시지와, 아리아의 '나도.'가 거의 동시에 도착했다.",
+    next: "confession",
+  },
+  {
+    id: "confession",
+    day: "4월 29일 토요일",
+    place: "봄빛제 불꽃놀이",
+    speaker: "나",
+    text: "불꽃이 터지는 순간. 나는 마음을 정해야 한다.",
+    choices: [
+      {
+        label: "유나에게 고백한다",
+        effects: { courage: 2 },
+        next: (state) => (state.yuna >= 7 ? "ending-yuna-good" : "ending-yuna-bad"),
+      },
+      {
+        label: "아리아에게 고백한다",
+        effects: { courage: 2 },
+        next: (state) => (state.aria >= 7 ? "ending-aria-good" : "ending-aria-bad"),
+      },
+      {
+        label: "지금은 고백하지 않는다",
+        next: (state) => (state.courage >= 4 ? "ending-solo-growth" : "ending-solo-plain"),
+      },
+    ],
+  },
+  {
+    id: "ending-yuna-good",
+    day: "엔딩",
+    place: "운동장 관중석",
+    speaker: "유나",
+    text: "'나도 같은 마음이었어.' 불꽃보다 더 밝게 웃는 유나와, 우리는 첫 데이트 약속을 잡았다. [유나 루트 해피 엔딩]",
+  },
+  {
+    id: "ending-yuna-bad",
+    day: "엔딩",
+    place: "운동장 관중석",
+    speaker: "유나",
+    text: "유나는 미안하다고 말했지만, 마지막엔 웃으며 손을 내밀었다. '친구로도 소중해.' [유나 루트 노멀 엔딩]",
+  },
+  {
+    id: "ending-aria-good",
+    day: "엔딩",
+    place: "도서관 뒤 정원",
+    speaker: "아리아",
+    text: "아리아는 한참 침묵하다가 내 손끝을 잡았다. '이번엔 네가 먼저 말했네.' [아리아 루트 해피 엔딩]",
+  },
+  {
+    id: "ending-aria-bad",
+    day: "엔딩",
+    place: "도서관 뒤 정원",
+    speaker: "아리아",
+    text: "아리아는 조용히 고개를 저었지만, 내 노트를 돌려주며 웃었다. '계속 같이 쓰자.' [아리아 루트 노멀 엔딩]",
+  },
+  {
+    id: "ending-solo-growth",
+    day: "엔딩",
+    place: "학교 정문",
+    speaker: "나",
+    text: "오늘은 고백하지 않았지만 도망치지도 않았다. 다음 계절엔 더 솔직해질 수 있을 것 같다. [성장 엔딩]",
+  },
+  {
+    id: "ending-solo-plain",
+    day: "엔딩",
+    place: "집으로 가는 버스",
+    speaker: "나",
+    text: "아무 말도 하지 못한 채 축제는 끝났다. 다음엔 용기를 내자고 마음속으로만 다짐했다. [일상 엔딩]",
+  },
+];
 
-function countMap<T extends string>(values: T[]): Map<T, number> {
-  const map = new Map<T, number>();
-  for (const value of values) {
-    map.set(value, (map.get(value) ?? 0) + 1);
-  }
-  return map;
+const SCENE_MAP = new Map(SCENES.map((scene) => [scene.id, scene]));
+
+function clamp(value: number): number {
+  return Math.max(0, Math.min(10, value));
 }
 
-function byCountDesc(a: [string, number], b: [string, number]): number {
-  return b[1] - a[1];
+function applyEffects(base: GameState, effects?: Partial<GameState>): GameState {
+  if (!effects) return base;
+  return {
+    yuna: clamp(base.yuna + (effects.yuna ?? 0)),
+    aria: clamp(base.aria + (effects.aria ?? 0)),
+    courage: clamp(base.courage + (effects.courage ?? 0)),
+  };
+}
+
+function meter(value: number): string {
+  return "#".repeat(value).padEnd(10, "-");
+}
+
+function endingReached(sceneId: string): boolean {
+  return sceneId.startsWith("ending-");
 }
 
 export default function App() {
-  const [novels, setNovels] = useState<WebNovel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [started, setStarted] = useState(false);
+  const [sceneId, setSceneId] = useState("prologue");
+  const [state, setState] = useState<GameState>(INITIAL_STATE);
+  const [history, setHistory] = useState<string[]>([]);
 
-  const [genre, setGenre] = useState<string>("전체");
-  const [length, setLength] = useState<Length | "전체">("전체");
-  const [tones, setTones] = useState<Tone[]>(["몰입"]);
-  const [query, setQuery] = useState("");
-  const [seed, setSeed] = useState(0);
+  const currentScene = SCENE_MAP.get(sceneId) ?? SCENE_MAP.get("prologue")!;
 
-  const [draftName, setDraftName] = useState("");
-  const [userName, setUserName] = useState("");
-  const [likes, setLikes] = useState<Set<string>>(new Set());
+  const chapter = useMemo(() => {
+    const index = SCENES.findIndex((scene) => scene.id === sceneId);
+    if (index < 0) return `DAY 1`;
+    return `DAY ${Math.min(6, index + 1)}`;
+  }, [sceneId]);
 
-  useEffect(() => {
-    const storedName = localStorage.getItem(USER_KEY) ?? "";
-    if (storedName) {
-      setUserName(storedName);
-      setDraftName(storedName);
-      const rawLikes = localStorage.getItem(`${LIKE_PREFIX}${storedName}`);
-      if (rawLikes) {
-        try {
-          setLikes(new Set(JSON.parse(rawLikes) as string[]));
-        } catch {
-          setLikes(new Set());
-        }
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadNovels() {
-      setLoading(true);
-      setError("");
-      try {
-        const response = await fetch("/data/webnovels.json");
-        if (!response.ok) throw new Error(`데이터 로드 실패 (${response.status})`);
-        const data = (await response.json()) as WebNovel[];
-        if (!cancelled) setNovels(data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "데이터 로드 실패");
-          setNovels([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void loadNovels();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const allGenres = useMemo(
-    () => Array.from(new Set(novels.flatMap((novel) => novel.genres))).sort(),
-    [novels],
-  );
-
-  const allTones = useMemo(
-    () => Array.from(new Set(novels.flatMap((novel) => novel.tones))),
-    [novels],
-  );
-
-  const likedNovels = useMemo(
-    () => novels.filter((novel) => likes.has(novel.id)),
-    [novels, likes],
-  );
-
-  const profile = useMemo(() => {
-    const genreFreq = countMap(likedNovels.flatMap((novel) => novel.genres));
-    const toneFreq = countMap(likedNovels.flatMap((novel) => novel.tones));
-    const platformFreq = countMap(likedNovels.map((novel) => novel.platform));
-
-    return {
-      topGenres: Array.from(genreFreq.entries()).sort(byCountDesc).slice(0, 3).map(([name]) => name),
-      topTones: Array.from(toneFreq.entries()).sort(byCountDesc).slice(0, 3).map(([name]) => name),
-      topPlatforms: new Set(Array.from(platformFreq.entries()).sort(byCountDesc).slice(0, 2).map(([name]) => name)),
-      genreFreq,
-      toneFreq,
-    };
-  }, [likedNovels]);
-
-  const picks = useMemo(() => {
-    const ranked: RankedNovel[] = novels.map((novel) => {
-      let score = 0;
-      let personal = 0;
-
-      if (genre === "전체" || novel.genres.includes(genre)) score += 35;
-      if (length === "전체" || novel.length === length) score += 20;
-
-      const filterToneMatches = tones.filter((tone) => novel.tones.includes(tone)).length;
-      score += filterToneMatches * 16;
-
-      if (query) {
-        const target = `${novel.title} ${novel.author} ${novel.intro} ${novel.hook}`.toLowerCase();
-        if (target.includes(query.toLowerCase())) score += 15;
-      }
-
-      if (novel.completed) score += 4;
-
-      if (userName) {
-        const sharedGenres = novel.genres.reduce((acc, item) => acc + (profile.genreFreq.get(item) ?? 0), 0);
-        const sharedTones = novel.tones.reduce((acc, item) => acc + (profile.toneFreq.get(item) ?? 0), 0);
-        personal += sharedGenres * 11;
-        personal += sharedTones * 10;
-        if (profile.topPlatforms.has(novel.platform)) personal += 7;
-      }
-
-      return { novel, score: score + personal, personal };
-    });
-
-    ranked.sort((a, b) => b.score - a.score);
-    const top = ranked.slice(0, 8);
-
-    if (seed % 2 === 1) {
-      return [...top.slice(0, 4), ...top.slice(5, 8), top[4]].filter(Boolean);
-    }
-    return top;
-  }, [novels, genre, length, tones, query, userName, profile, seed]);
-
-  function toggleTone(tone: Tone) {
-    setTones((prev) => (prev.includes(tone) ? prev.filter((item) => item !== tone) : [...prev, tone]));
+  function startGame() {
+    if (!playerName.trim()) return;
+    setStarted(true);
   }
 
-  function login() {
-    const next = draftName.trim();
-    if (!next) return;
+  function advance(next: string | ((value: GameState) => string), effects?: Partial<GameState>) {
+    const nextState = applyEffects(state, effects);
+    const resolved = typeof next === "function" ? next(nextState) : next;
 
-    setUserName(next);
-    localStorage.setItem(USER_KEY, next);
-
-    const rawLikes = localStorage.getItem(`${LIKE_PREFIX}${next}`);
-    if (!rawLikes) {
-      setLikes(new Set());
-      return;
-    }
-
-    try {
-      setLikes(new Set(JSON.parse(rawLikes) as string[]));
-    } catch {
-      setLikes(new Set());
-    }
+    setState(nextState);
+    setHistory((prev) => [...prev, currentScene.id]);
+    setSceneId(resolved);
   }
 
-  function logout() {
-    setUserName("");
-    setLikes(new Set());
-    localStorage.removeItem(USER_KEY);
+  function nextScene() {
+    if (!currentScene.next) return;
+    advance(currentScene.next);
   }
 
-  function toggleLike(id: string) {
-    if (!userName) return;
+  function restart() {
+    setSceneId("prologue");
+    setState(INITIAL_STATE);
+    setHistory([]);
+    setStarted(false);
+  }
 
-    setLikes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      localStorage.setItem(`${LIKE_PREFIX}${userName}`, JSON.stringify(Array.from(next)));
-      return next;
-    });
+  if (!started) {
+    return (
+      <main className="vn-shell intro-screen">
+        <section className="intro-card">
+          <p className="logo">SPRING SIGNAL</p>
+          <h1>미연시: 봄빛제의 고백</h1>
+          <p>선택지에 따라 유나/아리아 호감도와 엔딩이 달라집니다.</p>
+          <div className="intro-row">
+            <input
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+              placeholder="주인공 이름 입력"
+              aria-label="주인공 이름"
+            />
+            <button onClick={startGame}>게임 시작</button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
-    <div className="app-shell">
-      <header className="hero">
-        <p className="badge">NOVEL COMPASS</p>
-        <h1>웹소설 추천 스테이션</h1>
-        <p>내부 DB + 로그인 취향 기록 기반 개인화 추천</p>
-      </header>
+    <main className="vn-shell">
+      <section className="hud">
+        <div>
+          <p className="chip">{chapter}</p>
+          <p className="place">{currentScene.day} · {currentScene.place}</p>
+        </div>
+        <div className="meters">
+          <p>유나 호감도 [{meter(state.yuna)}] {state.yuna}/10</p>
+          <p>아리아 호감도 [{meter(state.aria)}] {state.aria}/10</p>
+          <p>용기 [{meter(state.courage)}] {state.courage}/10</p>
+        </div>
+      </section>
 
-      <section className="user-panel">
-        {!userName ? (
-          <>
-            <p className="user-title">로그인</p>
-            <div className="user-row">
-              <input
-                value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
-                placeholder="닉네임 입력"
-                aria-label="닉네임 입력"
-              />
-              <button onClick={login}>시작하기</button>
+      <section className="stage">
+        <div className="bg-layer" />
+        <article className="dialogue-box">
+          <p className="speaker">{currentScene.speaker}</p>
+          <h2>{playerName}</h2>
+          <p className="line">{currentScene.text}</p>
+
+          {!!currentScene.choices?.length && (
+            <div className="choices">
+              {currentScene.choices.map((choice) => (
+                <button
+                  key={choice.label}
+                  className="choice-btn"
+                  onClick={() => advance(choice.next, choice.effects)}
+                >
+                  {choice.label}
+                </button>
+              ))}
             </div>
-            <p className="user-help">닉네임별로 찜 목록이 로컬에 저장됩니다.</p>
-          </>
-        ) : (
-          <>
-            <div className="user-head">
-              <p className="user-title">{userName}님 맞춤 추천</p>
-              <button className="logout" onClick={logout}>로그아웃</button>
+          )}
+
+          {!currentScene.choices && currentScene.next && (
+            <button className="next-btn" onClick={nextScene}>다음 장면</button>
+          )}
+
+          {endingReached(sceneId) && (
+            <div className="ending-actions">
+              <p>플레이 기록: {history.length + 1}개 장면 진행</p>
+              <button className="next-btn" onClick={restart}>처음부터 다시</button>
             </div>
-            <p className="user-help">찜 {likes.size}개 · 선호 장르 {profile.topGenres.join(", ") || "데이터 수집 중"} · 선호 분위기 {profile.topTones.join(", ") || "데이터 수집 중"}</p>
-          </>
-        )}
+          )}
+        </article>
       </section>
-
-      <section className="filter-panel">
-        <div className="filter-row">
-          <label>장르</label>
-          <div className="chip-wrap">
-            {["전체", ...allGenres].map((item) => (
-              <button
-                key={item}
-                className={`chip ${genre === item ? "active" : ""}`}
-                onClick={() => setGenre(item)}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="filter-row">
-          <label>분위기</label>
-          <div className="chip-wrap">
-            {allTones.map((tone) => (
-              <button
-                key={tone}
-                className={`chip ${tones.includes(tone) ? "active" : ""}`}
-                onClick={() => toggleTone(tone)}
-              >
-                {tone}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="filter-row compact">
-          <label htmlFor="length">분량</label>
-          <select id="length" value={length} onChange={(event) => setLength(event.target.value as Length | "전체")}>
-            <option value="전체">전체</option>
-            <option value="단편">단편</option>
-            <option value="중편">중편</option>
-            <option value="장편">장편</option>
-          </select>
-
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="제목/키워드 검색"
-            aria-label="제목 또는 키워드 검색"
-          />
-
-          <button className="shuffle" onClick={() => setSeed((prev) => prev + 1)}>
-            추천 섞기
-          </button>
-        </div>
-      </section>
-
-      <section className="result-panel">
-        <div className="result-head">
-          <h2>추천 결과</h2>
-          <p>상위 {picks.length}개</p>
-        </div>
-
-        {loading && <p className="status-text">내부 DB에서 웹소설 목록 불러오는 중...</p>}
-        {!!error && <p className="status-text error">{error}</p>}
-
-        {!loading && !error && (
-          <div className="card-grid">
-            {picks.map(({ novel, score, personal }) => (
-              <article key={novel.id} className="novel-card">
-                <div className="novel-top">
-                  <h3>{novel.title}</h3>
-                  <span>{score}점</span>
-                </div>
-                <p className="meta">{novel.author} · {novel.platform} · {novel.length} · {novel.completed ? "완결" : "연재중"}</p>
-                <p className="intro">{novel.intro}</p>
-                <p className="hook">추천 포인트: {novel.hook}</p>
-                <div className="tags">
-                  {novel.genres.map((item) => <span key={item}>#{item}</span>)}
-                </div>
-                <div className="card-bottom">
-                  <p className="personal">개인화 가중치 +{personal}</p>
-                  <button
-                    className={`like-btn ${likes.has(novel.id) ? "on" : ""}`}
-                    onClick={() => toggleLike(novel.id)}
-                    disabled={!userName}
-                  >
-                    {likes.has(novel.id) ? "찜 완료" : "찜하기"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+    </main>
   );
 }
